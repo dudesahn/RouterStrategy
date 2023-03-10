@@ -3,7 +3,7 @@ from brownie import Contract, ZERO_ADDRESS, Wei, chain
 
 
 def test_profit_emergency(
-    yvweth_032, yvweth_042, unique_strategy, gov, weth, weth_whale
+    curve_susd_035, curve_susd_045, unique_strategy, gov, token, whale
 ):
 
     strategy = unique_strategy
@@ -13,7 +13,7 @@ def test_profit_emergency(
 
     # Send profit to 042
     prev_value = strategy.valueOfInvestment()
-    weth.transfer(yvweth_042, Wei("100 ether"), {"from": weth_whale})
+    token.transfer(curve_susd_045, Wei("100 ether"), {"from": whale})
     assert strategy.valueOfInvestment() > prev_value
 
     strategy.setEmergencyExit({"from": gov})
@@ -21,8 +21,8 @@ def test_profit_emergency(
     chain.sleep(3600 * 8)
     chain.mine(1)
 
-    total_gain = yvweth_032.strategies(strategy).dict()["totalGain"]
+    total_gain = curve_susd_035.strategies(strategy).dict()["totalGain"]
     assert total_gain > 0
-    assert yvweth_032.strategies(strategy).dict()["totalLoss"] == 0
+    assert curve_susd_035.strategies(strategy).dict()["totalLoss"] == 0
     assert strategy.balanceOfWant() == 0
     assert strategy.valueOfInvestment() == 0

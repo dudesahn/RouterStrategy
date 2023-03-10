@@ -34,10 +34,10 @@ def do_happy_case(old_vault, strategy, whale):
     old_vault.setPerformanceFee(0, {"from": gov})
     old_vault.setManagementFee(0, {"from": gov})
     if not old_vault.strategies(strategy):
-        old_vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
+        old_vault.addStrategy(strategy, 10_000, 0, 2**256 - 1, 0, {"from": gov})
     old_vault.setDepositLimit(0, {"from": gov})
 
-    new_vault.setDepositLimit(2 ** 256 - 1, {"from": new_vault.governance()})
+    new_vault.setDepositLimit(2**256 - 1, {"from": new_vault.governance()})
 
     assert strategy.balanceOfWant() == 0
     assert strategy.valueOfInvestment() == 0
@@ -50,7 +50,7 @@ def do_happy_case(old_vault, strategy, whale):
     prev_value = strategy.valueOfInvestment()
 
     # Produce earning in the new_vault
-    token.transfer(new_vault, Wei("10 ether"), {"from": whale})
+    token.transfer(new_vault, Wei("1000 ether"), {"from": whale})
     assert strategy.valueOfInvestment() > prev_value
 
     # harvest all strats in new vault

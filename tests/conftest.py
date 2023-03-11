@@ -68,14 +68,14 @@ def keeper(accounts):
 
 
 @pytest.fixture(scope="session")
-def whale(accounts):
-    yield accounts.at("0x6190e652462ee63420E45c9c554C22A3C9a694ec", True)  # 140k tokens
-
-
-@pytest.fixture(scope="session")
 def token():
     token_address = "0xC25a3A3b969415c80451098fa907EC722572917F"  # this should be the address of the ERC-20 used by the strategy/vault (curve sUSD)
     yield Contract(token_address)
+
+
+@pytest.fixture(scope="session")
+def whale(accounts):
+    yield accounts.at("0x6190e652462ee63420E45c9c554C22A3C9a694ec", True)  # 140k tokens
 
 
 @pytest.fixture(scope="session")
@@ -86,6 +86,47 @@ def amount(accounts, token, user, whale):
     reserve = accounts.at(whale, force=True)
     token.transfer(user, amount, {"from": reserve})
     yield amount
+
+
+@pytest.fixture(scope="session")
+def profit_whale(accounts):
+    yield accounts.at("0x5BB622ba7b2F09BF23F1a9b509cd210A818c53d7", True)  # 114k tokens
+
+
+@pytest.fixture(scope="session")
+def profit_amount(token):
+    profit_amount = 500 * 10 ** token.decimals()
+    yield profit_amount
+
+
+# use this to test our strategy in case there are no profits
+@pytest.fixture(scope="session")
+def no_profit():
+    no_profit = False
+    yield no_profit
+
+
+# use this when we might lose a few wei on conversions between want and another deposit token
+# generally this will always be true if no_profit is true, even for curve/convex since we can lose a wei converting
+@pytest.fixture(scope="session")
+def is_slippery(no_profit):
+    is_slippery = False
+    if no_profit:
+        is_slippery = True
+    yield is_slippery
+
+
+# use this to set the standard amount of time we sleep between harvests.
+# generally 1 day, but can be less if dealing with smaller windows (oracles) or longer if we need to trigger weekly earnings.
+@pytest.fixture(scope="session")
+def sleep_time():
+    hour = 3600
+
+    # change this one right here
+    hours_to_sleep = 24
+
+    sleep_time = hour * hours_to_sleep
+    yield sleep_time
 
 
 @pytest.fixture(scope="session")
@@ -141,6 +182,7 @@ def RELATIVE_APPROX():
 
 # unique fixtures for this repo
 
+
 @pytest.fixture(scope="session")
 def curve_susd_035():
     yield Contract("0x5a770DbD3Ee6bAF2802D29a901Ef11501C44797A")
@@ -161,6 +203,12 @@ def origin_vault():
 def destination_vault():
     # destination vault of the route
     yield Contract("0x5b2384D566D2E4a0b29B8eccB642C63199cd393c")
+
+
+@pytest.fixture(scope="session")
+def destination_strategy():
+    # destination strategy of the route
+    yield Contract("0x83D0458e627cFD7C6d0da12a1223bd168e1c8B64")
 
 
 @pytest.fixture
@@ -196,109 +244,90 @@ def unique_strategy(
     yield strategy
 
 
-# this should match whatever fixtures our harvest needs
 @pytest.fixture
 def strategy_harvest(
-    origin_vault,
-    destination_vault,
+    vault,
     strategy,
     gov,
     token,
     whale,
-    RELATIVE_APPROX,
+    profit_whale,
+    profit_amount,
+    destination_vault,
+    destination_strategy,
 ):
-    return StrategyHarvest.harvest(
-        origin_vault,
-        destination_vault,
-        strategy,
-        gov,
-        token,
-        whale,
-        RELATIVE_APPROX,
-    )
-
-
-class StrategyHarvest:
-    @staticmethod
-    # we put harvests into a separate function so we can alter this easily for different repos
-    def harvest(
-        origin_vault,
-        destination_vault,
-        strategy,
-        gov,
-        token,
-        whale,
-        RELATIVE_APPROX,
-    ):
-        print("Token:", token)
-        print("Strategy:", strategy)
-        vault = origin_vault
-
+    def strategy_sub_harvest():
         # sleep and mine before a harvest
         chain.sleep(1)
         chain.mine(1)
 
-        print(strategy.name())
+        # if this is our first harvest, can keep it simple
+        if strategy.estimatedTotalAssets() == 0:
+            tx = strategy.harvest({"from": gov})
+            chain.sleep(1)
+            chain.mine(1)
+            # make sure we have funds and they're all invested
+            assert strategy.estimatedTotalAssets() > 0
+            assert strategy.balanceOfWant() == 0
 
-        strategy.harvest({"from": gov})
-        assert strategy.balanceOfWant() == 0
-        assert strategy.valueOfInvestment() > 0
-        chain.sleep(1)
-        chain.mine(1)
+            ################## ROUTER-SPECIFIC SECTION BELOW ##################
 
-        prev_value = strategy.valueOfInvestment()
+            # extra check for router
+            assert strategy.valueOfInvestment() > 0
 
-        # have to harvest strategy to queue that profit in 0.4.6, donations to vault don't work, turn off health check
-        destination_strategy = Contract("0x83D0458e627cFD7C6d0da12a1223bd168e1c8B64")
-        token.transfer(destination_strategy, 10_000e18, {"from": whale})
-        dest_pps = destination_vault.pricePerShare()
-        print("Destination PPS:", dest_pps / 1e18)
-        destination_strategy.setDoHealthCheck(False, {"from": gov})
-        tx = destination_strategy.harvest({"from": gov})
-        chain.sleep(3600)
-        chain.mine(10)
-        dest_pps = destination_vault.pricePerShare()
-        print("Destination PPS:", dest_pps / 1e18)
-        print("Harvest Profit:", tx.events["Harvested"]["profit"])
+            ################## ROUTER-SPECIFIC SECTION ABOVE ##################
 
-        assert strategy.valueOfInvestment() > prev_value
+        else:
+            # make sure we have funds and they're all invested
+            assert strategy.estimatedTotalAssets() > 0
+            assert strategy.balanceOfWant() == 0
 
-        strategy.harvest({"from": gov})
-        chain.sleep(3600 * 11)
-        chain.mine(1)
+            ################## ROUTER-SPECIFIC SECTION BELOW ##################
 
-        total_gain = vault.strategies(strategy).dict()["totalGain"]
-        assert total_gain > 0
-        assert vault.strategies(strategy).dict()["totalLoss"] == 0
+            # extra checks for router
+            assert strategy.valueOfInvestment() > 0
+            prev_value = strategy.valueOfInvestment()
 
-        vault.revokeStrategy(strategy, {"from": gov})
-        tx = strategy.harvest({"from": gov})
+            # have to harvest strategy to queue that profit in 0.4.6, donations to vault don't work
+            # donate some profit to our destination strategy, we will do something similar in yswaps strategies
+            token.transfer(destination_strategy, profit_amount, {"from": profit_whale})
+            dest_pps = destination_vault.pricePerShare()
+            print("Destination PPS:", dest_pps / 1e18)
+
+            # harvest the destination strategy, turn off health check
+            destination_strategy.setDoHealthCheck(False, {"from": gov})
+            tx = destination_strategy.harvest({"from": gov})
+
+            # simulate five days of waiting for share price to bump back up
+            chain.sleep(86400 * 5)
+            chain.mine(1)
+
+            dest_pps = destination_vault.pricePerShare()
+            print("Destination PPS:", dest_pps / 1e18)
+            print("Destination Vault Harvest Profit:", tx.events["Harvested"]["profit"] / (10 ** token.decimals()))
+
+            # make sure we've profited
+            assert strategy.valueOfInvestment() > prev_value
+
+            ################## ROUTER-SPECIFIC SECTION ABOVE ##################
+
+            # harvest our strategy to take a profit
+            tx = strategy.harvest({"from": gov})
+            print("Origin Vault Harvest Profit:", tx.events["Harvested"]["profit"] / (10 ** token.decimals()))
+
+            # make sure we had profits and no loss
+            total_gain = vault.strategies(strategy).dict()["totalGain"]
+            assert total_gain > 0
+            assert vault.strategies(strategy).dict()["totalLoss"] == 0
+
+        # print out our harvested event
         harvested = tx.events["Harvested"]
-        total_gain += harvested["profit"]
-        chain.sleep(3600 * 8)
-        chain.mine(1)
-        
         print("Harvested:", harvested)
-
-        assert (
-            pytest.approx(
-                vault.strategies(strategy).dict()["totalGain"], rel=RELATIVE_APPROX
-            )
-            == total_gain
-        )
-        assert (
-            pytest.approx(
-                vault.strategies(strategy).dict()["totalLoss"], rel=RELATIVE_APPROX
-            )
-            == 0
-        )
-        assert (
-            pytest.approx(
-                vault.strategies(strategy).dict()["totalDebt"], rel=RELATIVE_APPROX
-            )
-            == 0
-        )
 
         # sleep and mine at the end
         chain.sleep(1)
         chain.mine(1)
+        print("Harvest successful")
+        return tx
+
+    yield strategy_sub_harvest

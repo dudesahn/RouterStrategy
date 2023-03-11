@@ -13,14 +13,10 @@ def test_triggers(
     strategy,
     chain,
     amount,
-    gasOracle,
-    strategist_ms,
+    sleep_time,
     is_slippery,
     no_profit,
-    sleep_time,
-    profit_amount,
-    profit_whale,
-    which_strategy,
+    strategy_harvest,
 ):
     # frax strategy gets stuck on these views, so we call them instead
     if which_strategy == 2:

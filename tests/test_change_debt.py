@@ -16,17 +16,13 @@ def test_change_debt(
     sleep_time,
     is_slippery,
     no_profit,
-    profit_amount,
-    profit_whale,
-    which_strategy,
+    strategy_harvest,
 ):
     ## deposit to the vault after approving
     startingWhale = token.balanceOf(whale)
     token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    chain.sleep(1)
-    strategy.harvest({"from": gov})
-    chain.sleep(1)
+    harvest_tx = strategy_harvest()
 
     # evaluate our current total assets
     old_assets = vault.totalAssets()
@@ -36,13 +32,7 @@ def test_change_debt(
     currentDebt = vault.strategies(strategy)["debtRatio"]
     vault.updateStrategyDebtRatio(strategy, currentDebt / 2, {"from": gov})
     chain.sleep(sleep_time)
-    token.transfer(strategy, profit_amount, {"from": profit_whale})
-    if which_strategy == 2:
-        # wait another week so our frax LPs are unlocked, need to do this when reducing debt or withdrawing
-        chain.sleep(86400 * 7)
-        chain.mine(1)
-    strategy.harvest({"from": gov})
-    chain.sleep(1)
+    harvest_tx = strategy_harvest()
 
     assert strategy.estimatedTotalAssets() <= startingStrategy
 
@@ -52,10 +42,7 @@ def test_change_debt(
 
     # set DebtRatio back to 100%
     vault.updateStrategyDebtRatio(strategy, currentDebt, {"from": gov})
-    chain.sleep(1)
-    token.transfer(strategy, profit_amount, {"from": profit_whale})
-    strategy.harvest({"from": gov})
-    chain.sleep(1)
+    harvest_tx = strategy_harvest()
 
     # evaluate our current total assets
     new_assets = vault.totalAssets()
@@ -63,16 +50,11 @@ def test_change_debt(
     # confirm we made money, or at least that we have about the same
     assert new_assets >= old_assets or math.isclose(new_assets, old_assets, abs_tol=5)
 
-    # simulate a day of waiting for share price to bump back up
-    chain.sleep(86400)
+    # simulate five days of waiting for share price to bump back up
+    chain.sleep(86400 * 5)
     chain.mine(1)
 
-    if which_strategy == 2:
-        # wait another week so our frax LPs are unlocked
-        chain.sleep(86400 * 7)
-        chain.mine(1)
-
-    # withdraw and confirm we made money, or at least that we have about the same
+    # withdraw and confirm we made money, or at least that we have about the same (profit whale has to be different from normal whale)
     vault.withdraw({"from": whale})
     if is_slippery and no_profit:
         assert (

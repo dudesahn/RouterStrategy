@@ -13,23 +13,17 @@ def test_withdraw_after_donation_1(
     strategy,
     chain,
     amount,
+    sleep_time,
     is_slippery,
     no_profit,
-    sleep_time,
-    profit_amount,
-    profit_whale,
-    which_strategy,
+    strategy_harvest,
 ):
 
     ## deposit to the vault after approving
     token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    chain.sleep(1)
-    strategy.harvest({"from": gov})
-    chain.sleep(1)
-
+    harvest_tx = strategy_harvest()
     prev_params = vault.strategies(strategy)
-
     currentDebt = vault.strategies(strategy)["debtRatio"]
     vault.updateStrategyDebtRatio(strategy, currentDebt / 2, {"from": gov})
     assert vault.strategies(strategy)["debtRatio"] == currentDebt / 2
@@ -37,12 +31,6 @@ def test_withdraw_after_donation_1(
     # our whale donates dust to the vault, what a nice person!
     donation = amount / 2
     token.transfer(strategy, donation, {"from": whale})
-
-    # have our whale withdraw half of his donation, this ensures that we test withdrawing without pulling from the staked balance
-    if which_strategy == 2:
-        # wait another week so our frax LPs are unlocked
-        chain.sleep(86400 * 7)
-        chain.mine(1)
     vault.withdraw(donation / 2, {"from": whale})
 
     # simulate some earnings
@@ -51,13 +39,11 @@ def test_withdraw_after_donation_1(
 
     # turn off health check since we just took big profit
     strategy.setDoHealthCheck(False, {"from": gov})
-    chain.sleep(1)
-    token.transfer(strategy, profit_amount, {"from": profit_whale})
-    tx = strategy.harvest({"from": gov})
+    harvest_tx = strategy_harvest()
     new_params = vault.strategies(strategy)
 
-    # sleep 10 hours to allow share price to normalize
-    chain.sleep(60 * 60 * 10)
+    # sleep 5 days to allow share price to normalize
+    chain.sleep(86400 * 5)
     chain.mine(1)
 
     profit = new_params["totalGain"] - prev_params["totalGain"]
@@ -97,21 +83,16 @@ def test_withdraw_after_donation_2(
     strategy,
     chain,
     amount,
+    sleep_time,
     is_slippery,
     no_profit,
-    sleep_time,
-    profit_amount,
-    profit_whale,
-    which_strategy,
+    strategy_harvest,
 ):
 
     ## deposit to the vault after approving
     token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    chain.sleep(1)
-    strategy.harvest({"from": gov})
-    chain.sleep(1)
-
+    harvest_tx = strategy_harvest()
     prev_params = vault.strategies(strategy)
 
     currentDebt = vault.strategies(strategy)["debtRatio"]
@@ -123,10 +104,6 @@ def test_withdraw_after_donation_2(
     token.transfer(strategy, donation, {"from": whale})
 
     # have our whale withdraw half of his donation, this ensures that we test withdrawing without pulling from the staked balance
-    if which_strategy == 2:
-        # wait another week so our frax LPs are unlocked
-        chain.sleep(86400 * 7)
-        chain.mine(1)
     vault.withdraw(donation / 2, {"from": whale})
 
     # simulate some earnings
@@ -135,15 +112,13 @@ def test_withdraw_after_donation_2(
 
     # turn off health check since we just took big profit
     strategy.setDoHealthCheck(False, {"from": gov})
-    token.transfer(strategy, profit_amount, {"from": profit_whale})
-    chain.sleep(1)
-    strategy.harvest({"from": gov})
+    harvest_tx = strategy_harvest()
     new_params = vault.strategies(strategy)
 
-    # sleep 10 hours to allow share price to normalize
-    chain.sleep(60 * 60 * 10)
+    # sleep 5 days to allow share price to normalize
+    chain.sleep(86400 * 5)
     chain.mine(1)
-
+    
     profit = new_params["totalGain"] - prev_params["totalGain"]
 
     # specifically check that our gain is greater than our donation or at least no more than 10 wei if we get slippage on deposit/withdrawal
@@ -181,20 +156,16 @@ def test_withdraw_after_donation_3(
     strategy,
     chain,
     amount,
+    sleep_time,
     is_slippery,
     no_profit,
-    sleep_time,
-    profit_amount,
-    profit_whale,
-    which_strategy,
+    strategy_harvest,
 ):
 
     ## deposit to the vault after approving
     token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    chain.sleep(1)
-    strategy.harvest({"from": gov})
-    chain.sleep(1)
+    harvest_tx = strategy_harvest()
 
     prev_params = vault.strategies(strategy)
 
@@ -207,10 +178,6 @@ def test_withdraw_after_donation_3(
     token.transfer(strategy, donation, {"from": whale})
 
     # have our whale withdraws more than his donation, ensuring we pull from strategy
-    if which_strategy == 2:
-        # wait another week so our frax LPs are unlocked
-        chain.sleep(86400 * 7)
-        chain.mine(1)
     withdrawal = donation + amount / 4
 
     # convert since our PPS isn't 1 (live vault!)
@@ -223,13 +190,11 @@ def test_withdraw_after_donation_3(
 
     # turn off health check since we just took big profit
     strategy.setDoHealthCheck(False, {"from": gov})
-    chain.sleep(1)
-    token.transfer(strategy, profit_amount, {"from": profit_whale})
-    strategy.harvest({"from": gov})
+    harvest_tx = strategy_harvest()
     new_params = vault.strategies(strategy)
 
-    # sleep 10 hours to allow share price to normalize
-    chain.sleep(60 * 60 * 10)
+    # sleep 5 days to allow share price to normalize
+    chain.sleep(86400 * 5)
     chain.mine(1)
 
     profit = new_params["totalGain"] - prev_params["totalGain"]
@@ -269,20 +234,16 @@ def test_withdraw_after_donation_4(
     strategy,
     chain,
     amount,
+    sleep_time,
     is_slippery,
     no_profit,
-    sleep_time,
-    profit_amount,
-    profit_whale,
-    which_strategy,
+    strategy_harvest,
 ):
 
     ## deposit to the vault after approving
     token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    chain.sleep(1)
-    strategy.harvest({"from": gov})
-    chain.sleep(1)
+    harvest_tx = strategy_harvest()
 
     prev_params = vault.strategies(strategy)
 
@@ -295,10 +256,6 @@ def test_withdraw_after_donation_4(
     token.transfer(strategy, donation, {"from": whale})
 
     # have our whale withdraws more than his donation, ensuring we pull from strategy
-    if which_strategy == 2:
-        # wait another week so our frax LPs are unlocked
-        chain.sleep(86400 * 7)
-        chain.mine(1)
     withdrawal = donation + amount / 4
 
     # convert since our PPS isn't 1 (live vault!)
@@ -311,13 +268,11 @@ def test_withdraw_after_donation_4(
 
     # turn off health check since we just took big profit
     strategy.setDoHealthCheck(False, {"from": gov})
-    chain.sleep(1)
-    token.transfer(strategy, profit_amount, {"from": profit_whale})
-    strategy.harvest({"from": gov})
+    harvest_tx = strategy_harvest()
     new_params = vault.strategies(strategy)
 
-    # sleep 10 hours to allow share price to normalize
-    chain.sleep(60 * 60 * 10)
+    # sleep 5 days to allow share price to normalize
+    chain.sleep(86400 * 5)
     chain.mine(1)
 
     profit = new_params["totalGain"] - prev_params["totalGain"]
@@ -360,20 +315,16 @@ def test_withdraw_after_donation_5(
     strategy,
     chain,
     amount,
+    sleep_time,
     is_slippery,
     no_profit,
-    sleep_time,
-    profit_amount,
-    profit_whale,
-    which_strategy,
+    strategy_harvest,
 ):
 
     ## deposit to the vault after approving
     token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    chain.sleep(1)
-    strategy.harvest({"from": gov})
-    chain.sleep(1)
+    harvest_tx = strategy_harvest()
 
     prev_params = vault.strategies(strategy)
 
@@ -382,10 +333,6 @@ def test_withdraw_after_donation_5(
     token.transfer(strategy, donation, {"from": whale})
 
     # have our whale withdraws more than his donation, ensuring we pull from strategy
-    if which_strategy == 2:
-        # wait another week so our frax LPs are unlocked
-        chain.sleep(86400 * 7)
-        chain.mine(1)
     withdrawal = donation + amount / 4
 
     # convert since our PPS isn't 1 (live vault!)
@@ -398,13 +345,11 @@ def test_withdraw_after_donation_5(
 
     # turn off health check since we just took big profit
     strategy.setDoHealthCheck(False, {"from": gov})
-    chain.sleep(1)
-    token.transfer(strategy, profit_amount, {"from": profit_whale})
-    strategy.harvest({"from": gov})
+    harvest_tx = strategy_harvest()
     new_params = vault.strategies(strategy)
 
-    # sleep 10 hours to allow share price to normalize
-    chain.sleep(60 * 60 * 10)
+    # sleep 5 days to allow share price to normalize
+    chain.sleep(86400 * 5)
     chain.mine(1)
 
     profit = new_params["totalGain"] - prev_params["totalGain"]
@@ -444,20 +389,16 @@ def test_withdraw_after_donation_6(
     strategy,
     chain,
     amount,
+    sleep_time,
     is_slippery,
     no_profit,
-    sleep_time,
-    profit_amount,
-    profit_whale,
-    which_strategy,
+    strategy_harvest,
 ):
 
     ## deposit to the vault after approving
     token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    chain.sleep(1)
-    strategy.harvest({"from": gov})
-    chain.sleep(1)
+    harvest_tx = strategy_harvest()
 
     prev_params = vault.strategies(strategy)
 
@@ -466,10 +407,6 @@ def test_withdraw_after_donation_6(
     token.transfer(strategy, donation, {"from": whale})
 
     # have our whale withdraws more than his donation, ensuring we pull from strategy
-    if which_strategy == 2:
-        # wait another week so our frax LPs are unlocked
-        chain.sleep(86400 * 7)
-        chain.mine(1)
     vault.withdraw(donation / 2, {"from": whale})
 
     # simulate some earnings
@@ -478,13 +415,11 @@ def test_withdraw_after_donation_6(
 
     # turn off health check since we just took big profit
     strategy.setDoHealthCheck(False, {"from": gov})
-    chain.sleep(1)
-    token.transfer(strategy, profit_amount, {"from": profit_whale})
-    strategy.harvest({"from": gov})
+    harvest_tx = strategy_harvest()
     new_params = vault.strategies(strategy)
 
-    # sleep 10 hours to allow share price to normalize
-    chain.sleep(60 * 60 * 10)
+    # sleep 5 days to allow share price to normalize
+    chain.sleep(86400 * 5)
     chain.mine(1)
 
     profit = new_params["totalGain"] - prev_params["totalGain"]
@@ -524,21 +459,16 @@ def test_withdraw_after_donation_7(
     strategy,
     chain,
     amount,
+    sleep_time,
     is_slippery,
     no_profit,
-    vault_address,
-    sleep_time,
-    profit_amount,
-    profit_whale,
-    which_strategy,
+    strategy_harvest,
 ):
 
     ## deposit to the vault after approving
     token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    chain.sleep(1)
-    strategy.harvest({"from": gov})
-    chain.sleep(1)
+    harvest_tx = strategy_harvest()
 
     prev_params = vault.strategies(strategy)
     prev_assets = vault.totalAssets()
@@ -558,10 +488,6 @@ def test_withdraw_after_donation_7(
 
     # convert since our PPS isn't 1 (live vault!)
     withdrawal_in_shares = withdrawal * 1e18 / vault.pricePerShare()
-    if which_strategy == 2:
-        # wait another week so our frax LPs are unlocked
-        chain.sleep(86400 * 7)
-        chain.mine(1)
     vault.withdraw(withdrawal_in_shares, {"from": whale})
 
     # simulate some earnings
@@ -573,8 +499,7 @@ def test_withdraw_after_donation_7(
 
     # turn off health check since we just took big profit
     strategy.setDoHealthCheck(False, {"from": gov})
-    token.transfer(strategy, profit_amount, {"from": profit_whale})
-    strategy.harvest({"from": gov})
+    harvest_tx = strategy_harvest()
 
     # check everywhere to make sure we emptied out the strategy
     assert strategy.estimatedTotalAssets() == 0
@@ -601,8 +526,8 @@ def test_withdraw_after_donation_7(
     else:
         assert starting_total_vault_debt - starting_strategy_debt <= vault.totalDebt()
 
-    # sleep 10 hours to allow share price to normalize
-    chain.sleep(60 * 60 * 10)
+    # sleep 5 days to allow share price to normalize
+    chain.sleep(86400 * 5)
     chain.mine(1)
 
     profit = new_params["totalGain"] - prev_params["totalGain"]
@@ -633,21 +558,16 @@ def test_withdraw_after_donation_8(
     strategy,
     chain,
     amount,
+    sleep_time,
     is_slippery,
     no_profit,
-    vault_address,
-    sleep_time,
-    profit_amount,
-    profit_whale,
-    which_strategy,
+    strategy_harvest,
 ):
 
     ## deposit to the vault after approving
     token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    chain.sleep(1)
-    strategy.harvest({"from": gov})
-    chain.sleep(1)
+    harvest_tx = strategy_harvest()
 
     prev_params = vault.strategies(strategy)
     prev_assets = vault.totalAssets()
@@ -667,10 +587,6 @@ def test_withdraw_after_donation_8(
 
     # convert since our PPS isn't 1 (live vault!)
     withdrawal_in_shares = withdrawal * 1e18 / vault.pricePerShare()
-    if which_strategy == 2:
-        # wait another week so our frax LPs are unlocked
-        chain.sleep(86400 * 7)
-        chain.mine(1)
     vault.withdraw(withdrawal_in_shares, {"from": whale})
 
     # simulate some earnings
@@ -682,8 +598,7 @@ def test_withdraw_after_donation_8(
 
     # turn off health check since we just took big profit
     strategy.setDoHealthCheck(False, {"from": gov})
-    token.transfer(strategy, profit_amount, {"from": profit_whale})
-    strategy.harvest({"from": gov})
+    harvest_tx = strategy_harvest()
 
     # check everywhere to make sure we emptied out the strategy
     assert strategy.estimatedTotalAssets() == 0
@@ -710,8 +625,8 @@ def test_withdraw_after_donation_8(
     else:
         assert starting_total_vault_debt - starting_strategy_debt <= vault.totalDebt()
 
-    # sleep 10 hours to allow share price to normalize
-    chain.sleep(60 * 60 * 10)
+    # sleep 5 days to allow share price to normalize
+    chain.sleep(86400 * 5)
     chain.mine(1)
 
     profit = new_params["totalGain"] - prev_params["totalGain"]

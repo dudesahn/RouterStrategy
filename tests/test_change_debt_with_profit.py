@@ -13,17 +13,15 @@ def test_change_debt_with_profit(
     chain,
     amount,
     sleep_time,
-    profit_amount,
-    profit_whale,
-    which_strategy,
+    is_slippery,
+    no_profit,
+    strategy_harvest,
 ):
 
     ## deposit to the vault after approving
     token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    chain.sleep(1)
-    chain.mine(1)
-    strategy.harvest({"from": gov})
+    harvest_report = strategy_harvest()
 
     # store our values before we start doing weird stuff
     prev_params = vault.strategies(strategy)
@@ -37,13 +35,7 @@ def test_change_debt_with_profit(
 
     # turn off health check since we just took big profit
     strategy.setDoHealthCheck(False, {"from": gov})
-    chain.sleep(1)
-    chain.mine(1)
-    if which_strategy == 2:
-        # wait another week so our frax LPs are unlocked, need to do this when reducing debt or withdrawing
-        chain.sleep(86400 * 7)
-        chain.mine(1)
-    strategy.harvest({"from": gov})
+    harvest_report = strategy_harvest()
     new_params = vault.strategies(strategy)
 
     # sleep 10 hours to allow share price to normalize

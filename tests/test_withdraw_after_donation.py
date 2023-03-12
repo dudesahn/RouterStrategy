@@ -20,7 +20,7 @@ def test_withdraw_after_donation_1(
 ):
 
     ## deposit to the vault after approving
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     harvest_tx = strategy_harvest()
     prev_params = vault.strategies(strategy)
@@ -90,7 +90,7 @@ def test_withdraw_after_donation_2(
 ):
 
     ## deposit to the vault after approving
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     harvest_tx = strategy_harvest()
     prev_params = vault.strategies(strategy)
@@ -118,7 +118,7 @@ def test_withdraw_after_donation_2(
     # sleep 5 days to allow share price to normalize
     chain.sleep(86400 * 5)
     chain.mine(1)
-    
+
     profit = new_params["totalGain"] - prev_params["totalGain"]
 
     # specifically check that our gain is greater than our donation or at least no more than 10 wei if we get slippage on deposit/withdrawal
@@ -163,7 +163,7 @@ def test_withdraw_after_donation_3(
 ):
 
     ## deposit to the vault after approving
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     harvest_tx = strategy_harvest()
 
@@ -241,7 +241,7 @@ def test_withdraw_after_donation_4(
 ):
 
     ## deposit to the vault after approving
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     harvest_tx = strategy_harvest()
 
@@ -322,7 +322,7 @@ def test_withdraw_after_donation_5(
 ):
 
     ## deposit to the vault after approving
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     harvest_tx = strategy_harvest()
 
@@ -396,7 +396,7 @@ def test_withdraw_after_donation_6(
 ):
 
     ## deposit to the vault after approving
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     harvest_tx = strategy_harvest()
 
@@ -463,10 +463,11 @@ def test_withdraw_after_donation_7(
     is_slippery,
     no_profit,
     strategy_harvest,
+    vault_address,
 ):
 
     ## deposit to the vault after approving
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     harvest_tx = strategy_harvest()
 
@@ -486,8 +487,8 @@ def test_withdraw_after_donation_7(
     # have our whale withdraws more than his donation, ensuring we pull from strategy
     withdrawal = donation + amount / 4
 
-    # convert since our PPS isn't 1 (live vault!)
-    withdrawal_in_shares = withdrawal * 1e18 / vault.pricePerShare()
+    # convert since our PPS isn't 1 (live vault!). Add 1 in case we get slight issues with math.
+    withdrawal_in_shares = withdrawal * 1e18 / vault.pricePerShare() + 1
     vault.withdraw(withdrawal_in_shares, {"from": whale})
 
     # simulate some earnings
@@ -502,7 +503,10 @@ def test_withdraw_after_donation_7(
     harvest_tx = strategy_harvest()
 
     # check everywhere to make sure we emptied out the strategy
-    assert strategy.estimatedTotalAssets() == 0
+    if is_slippery:
+        assert strategy.estimatedTotalAssets() <= 1
+    else:
+        assert strategy.estimatedTotalAssets() == 0
     assert token.balanceOf(strategy) == 0
     current_assets = vault.totalAssets()
 
@@ -562,10 +566,11 @@ def test_withdraw_after_donation_8(
     is_slippery,
     no_profit,
     strategy_harvest,
+    vault_address,
 ):
 
     ## deposit to the vault after approving
-    token.approve(vault, 2**256 - 1, {"from": whale})
+    token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     harvest_tx = strategy_harvest()
 
@@ -585,8 +590,8 @@ def test_withdraw_after_donation_8(
     # have our whale withdraws less than his donation
     withdrawal = donation / 2
 
-    # convert since our PPS isn't 1 (live vault!)
-    withdrawal_in_shares = withdrawal * 1e18 / vault.pricePerShare()
+    # convert since our PPS isn't 1 (live vault!). Add 1 in case we get slight issues with math.
+    withdrawal_in_shares = withdrawal * 1e18 / vault.pricePerShare() + 1
     vault.withdraw(withdrawal_in_shares, {"from": whale})
 
     # simulate some earnings
@@ -601,7 +606,10 @@ def test_withdraw_after_donation_8(
     harvest_tx = strategy_harvest()
 
     # check everywhere to make sure we emptied out the strategy
-    assert strategy.estimatedTotalAssets() == 0
+    if is_slippery:
+        assert strategy.estimatedTotalAssets() <= 1
+    else:
+        assert strategy.estimatedTotalAssets() == 0
     assert token.balanceOf(strategy) == 0
     current_assets = vault.totalAssets()
 

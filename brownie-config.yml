@@ -10,7 +10,6 @@ autofetch_sources: True
 dependencies:
   - yearn/yearn-vaults@0.4.6
   - OpenZeppelin/openzeppelin-contracts@4.7.0
-  - OpenZeppelin/openzeppelin-contracts@3.1.0
 
 # path remapping to support imports from GitHub/NPM
 compiler:
@@ -19,8 +18,7 @@ compiler:
     remappings:
       - "@yearnvaults=yearn/yearn-vaults@0.4.6"
       - "@openzeppelin=OpenZeppelin/openzeppelin-contracts@4.7.0"
-      - "@openzeppelinLegacy=OpenZeppelin/openzeppelin-contracts@3.1.0"
 
 reports:
   exclude_contracts:
-    - SafeMath
+    - Math

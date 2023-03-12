@@ -1,5 +1,5 @@
 import pytest
-from brownie import config, Contract, ZERO_ADDRESS, chain
+from brownie import config, Contract, ZERO_ADDRESS, chain, interface
 from eth_abi import encode_single
 import requests
 
@@ -11,6 +11,9 @@ def isolate(fn_isolation):
 
 # set this for if we want to use tenderly or not; mostly helpful because with brownie.reverts fails in tenderly forks.
 use_tenderly = False
+
+# use this to set what chain we use. 1 for ETH, 250 for fantom, 10 optimism, 42161 arbitrum
+chain_used = 1
 
 
 ################################################## TENDERLY DEBUGGING ##################################################
@@ -31,72 +34,87 @@ def tenderly_fork(web3, chain):
 
 ################################################ UPDATE THINGS BELOW HERE ################################################
 
-
-@pytest.fixture(scope="session")
-def gov(accounts):
-    yield accounts.at("0xFEB4acf3df3cDEA7399794D0869ef76A6EfAff52", force=True)
+#################### FIXTURES BELOW NEED TO BE ADJUSTED FOR THIS REPO ####################
 
 
 @pytest.fixture(scope="session")
-def user(accounts):
-    yield accounts[0]
-
-
-@pytest.fixture(scope="session")
-def rewards(accounts):
-    yield accounts[1]
-
-
-@pytest.fixture(scope="session")
-def guardian(accounts):
-    yield accounts[2]
-
-
-@pytest.fixture(scope="session")
-def management(accounts):
-    yield accounts[3]
-
-
-@pytest.fixture(scope="session")
-def strategist(accounts):
-    yield accounts[4]
-
-
-@pytest.fixture(scope="session")
-def keeper(accounts):
-    yield accounts[5]
-
-
-@pytest.fixture(scope="session")
-def token():
+def token(interface):
     token_address = "0xC25a3A3b969415c80451098fa907EC722572917F"  # this should be the address of the ERC-20 used by the strategy/vault (curve sUSD)
-    yield Contract(token_address)
+    yield interface.IERC20(token_address)
 
 
 @pytest.fixture(scope="session")
-def whale(accounts):
-    yield accounts.at("0x6190e652462ee63420E45c9c554C22A3C9a694ec", True)  # 140k tokens
+def whale(accounts, amount, token):
+    # Totally in it for the tech
+    # Update this with a large holder of your want token (the largest EOA holder of LP)
+    whale = accounts.at(
+        "0x6190e652462ee63420E45c9c554C22A3C9a694ec", force=True
+    )  # 0x6190e652462ee63420E45c9c554C22A3C9a694ec, SUSD pool, 140k tokens
+    if token.balanceOf(whale) < 2 * amount:
+        raise ValueError(
+            "Our whale needs more funds. Find another whale or reduce your amount variable."
+        )
+    yield whale
 
 
 @pytest.fixture(scope="session")
-def amount(accounts, token, user, whale):
-    amount = 50000 * 10 ** token.decimals()
-    # In order to get some funds for the token you are about to use,
-    # it impersonate an exchange address to use it's funds.
-    reserve = accounts.at(whale, force=True)
-    token.transfer(user, amount, {"from": reserve})
+def amount(token):
+    amount = 50_000 * 10 ** token.decimals()
     yield amount
 
 
 @pytest.fixture(scope="session")
-def profit_whale(accounts):
-    yield accounts.at("0x5BB622ba7b2F09BF23F1a9b509cd210A818c53d7", True)  # 114k tokens
+def profit_whale(accounts, profit_amount, token):
+    # ideally not the same whale as the main whale, or else they will lose money
+    profit_whale = accounts.at(
+        "0x5BB622ba7b2F09BF23F1a9b509cd210A818c53d7", force=True
+    )  # 0x5BB622ba7b2F09BF23F1a9b509cd210A818c53d7, SUSD pool, 114k tokens
+    if token.balanceOf(profit_whale) < 5 * profit_amount:
+        raise ValueError(
+            "Our profit whale needs more funds. Find another whale or reduce your profit_amount variable."
+        )
+    yield profit_whale
 
 
 @pytest.fixture(scope="session")
 def profit_amount(token):
     profit_amount = 500 * 10 ** token.decimals()
     yield profit_amount
+
+
+# set address if already deployed, use ZERO_ADDRESS if not
+@pytest.fixture(scope="session")
+def vault_address():
+    vault_address = "0x5a770DbD3Ee6bAF2802D29a901Ef11501C44797A"
+    yield vault_address
+
+
+# this is the name we want to give our strategy
+@pytest.fixture(scope="session")
+def strategy_name():
+    strategy_name = "RouterStrategy046"
+    yield strategy_name
+
+
+# this is the name of our strategy in the .sol file
+@pytest.fixture(scope="session")
+def contract_name(RouterStrategy):
+    contract_name = RouterStrategy
+    yield contract_name
+
+
+# if our strategy is using ySwaps, then we need to donate profit to it from our profit whale
+@pytest.fixture(scope="session")
+def use_yswaps():
+    use_yswaps = False
+    yield use_yswaps
+
+
+# whether or not a strategy is clonable. if true, don't forget to update what our cloning function is called in test_cloning.py
+@pytest.fixture(scope="session")
+def is_clonable():
+    is_clonable = True
+    yield is_clonable
 
 
 # use this to test our strategy in case there are no profits
@@ -106,11 +124,11 @@ def no_profit():
     yield no_profit
 
 
-# use this when we might lose a few wei on conversions between want and another deposit token
+# use this when we might lose a few wei on conversions between want and another deposit token (like router strategies)
 # generally this will always be true if no_profit is true, even for curve/convex since we can lose a wei converting
 @pytest.fixture(scope="session")
 def is_slippery(no_profit):
-    is_slippery = False
+    is_slippery = True  # set this to true or false as needed
     if no_profit:
         is_slippery = True
     yield is_slippery
@@ -129,50 +147,15 @@ def sleep_time():
     yield sleep_time
 
 
+#################### FIXTURES ABOVE NEED TO BE ADJUSTED FOR THIS REPO ####################
+
+#################### FIXTURES BELOW SHOULDN'T NEED TO BE ADJUSTED FOR THIS REPO ####################
+
+
 @pytest.fixture(scope="session")
-def health_check():
-    yield Contract("0xddcea799ff1699e98edf118e0629a974df7df012")
-
-
-@pytest.fixture
-def vault(pm, gov, rewards, guardian, management, token):
-    Vault = pm(config["dependencies"][0]).Vault
-    vault = guardian.deploy(Vault)
-    vault.initialize(token, gov, rewards, "", "", guardian, management)
-    vault.setDepositLimit(2**256 - 1, {"from": gov})
-    vault.setManagement(management, {"from": gov})
-    # yield vault
-    yield Contract("0x5a770DbD3Ee6bAF2802D29a901Ef11501C44797A")
-
-
-@pytest.fixture
-def strategy(
-    strategist,
-    keeper,
-    origin_vault,
-    destination_vault,
-    RouterStrategy,
-    gov,
-    health_check,
-):
-    strategy = strategist.deploy(
-        RouterStrategy, origin_vault, destination_vault, "Route yvCurve-sUSD 045"
-    )
-    strategy.setKeeper(keeper)
-
-    for i in range(0, 20):
-        strat_address = origin_vault.withdrawalQueue(i)
-        if ZERO_ADDRESS == strat_address:
-            break
-
-        if origin_vault.strategies(strat_address)["debtRatio"] > 0:
-            origin_vault.updateStrategyDebtRatio(strat_address, 0, {"from": gov})
-            Contract(strat_address).harvest({"from": gov})
-
-    strategy.setHealthCheck(health_check, {"from": origin_vault.governance()})
-    origin_vault.addStrategy(strategy, 10_000, 0, 2**256 - 1, 0, {"from": gov})
-
-    yield strategy
+def tests_using_tenderly():
+    yes_or_no = use_tenderly
+    yield yes_or_no
 
 
 @pytest.fixture(scope="session")
@@ -180,74 +163,147 @@ def RELATIVE_APPROX():
     yield 1e-5
 
 
-# unique fixtures for this repo
+# use this to set various fixtures that differ by chain
+if chain_used == 1:  # mainnet
+
+    @pytest.fixture(scope="session")
+    def gov(accounts):
+        yield accounts.at("0xFEB4acf3df3cDEA7399794D0869ef76A6EfAff52", force=True)
+
+    @pytest.fixture(scope="session")
+    def health_check(interface):
+        yield interface.IHealthCheck("0xddcea799ff1699e98edf118e0629a974df7df012")
+
+    @pytest.fixture(scope="session")
+    def base_fee_oracle(interface):
+        yield interface.IBaseFeeOracle("0xfeCA6895DcF50d6350ad0b5A8232CF657C316dA7")
+
+    # set all of the following to SMS, just simpler
+    @pytest.fixture(scope="session")
+    def management(accounts):
+        yield accounts.at("0x16388463d60FFE0661Cf7F1f31a7D658aC790ff7", force=True)
+
+    @pytest.fixture(scope="session")
+    def rewards(management):
+        yield management
+
+    @pytest.fixture(scope="session")
+    def guardian(management):
+        yield management
+
+    @pytest.fixture(scope="session")
+    def strategist(management):
+        yield management
+
+    @pytest.fixture(scope="session")
+    def keeper(management):
+        yield management
+
+    @pytest.fixture(scope="session")
+    def to_sweep(interface):
+        # token we can sweep out of strategy (use CRV)
+        yield interface.IERC20("0xD533a949740bb3306d119CC777fa900bA034cd52")
 
 
-@pytest.fixture(scope="session")
-def curve_susd_035():
-    yield Contract("0x5a770DbD3Ee6bAF2802D29a901Ef11501C44797A")
+@pytest.fixture(scope="module")
+def vault(
+    pm, gov, rewards, guardian, management, token, chain, vault_address, interface
+):
+    if vault_address == ZERO_ADDRESS:
+        Vault = pm(config["dependencies"][0]).Vault
+        vault = guardian.deploy(Vault)
+        vault.initialize(token, gov, rewards, "", "", guardian)
+        vault.setDepositLimit(2 ** 256 - 1, {"from": gov})
+        vault.setManagement(management, {"from": gov})
+        chain.sleep(1)
+        chain.mine(1)
+    else:
+        vault = interface.IVaultFactory045(vault_address)
+    yield vault
 
 
-@pytest.fixture(scope="session")
-def curve_susd_045():
-    yield Contract("0x5b2384D566D2E4a0b29B8eccB642C63199cd393c")
+#################### FIXTURES ABOVE SHOULDN'T NEED TO BE ADJUSTED FOR THIS REPO ####################
 
-
-@pytest.fixture(scope="session")
-def origin_vault():
-    # origin vault of the route
-    yield Contract("0x5a770DbD3Ee6bAF2802D29a901Ef11501C44797A")
-
-
-@pytest.fixture(scope="session")
-def destination_vault():
-    # destination vault of the route
-    yield Contract("0x5b2384D566D2E4a0b29B8eccB642C63199cd393c")
-
-
-@pytest.fixture(scope="session")
-def destination_strategy():
-    # destination strategy of the route
-    yield Contract("0x83D0458e627cFD7C6d0da12a1223bd168e1c8B64")
+#################### FIXTURES BELOW LIKELY NEED TO BE ADJUSTED FOR THIS REPO ####################
 
 
 @pytest.fixture
-def unique_strategy(
+def strategy(
     strategist,
     keeper,
-    curve_susd_035,
-    curve_susd_045,
+    vault,
+    destination_vault,
+    RouterStrategy,
+    gov,
+    management,
+    health_check,
+    contract_name,
+    strategy_name,
+    base_fee_oracle,
+    vault_address,
+    interface,
+):
+    strategy = strategist.deploy(contract_name, vault, destination_vault, strategy_name)
+    strategy.setKeeper(keeper, {"from": vault.governance()})
+    strategy.setHealthCheck(health_check, {"from": vault.governance()})
+    vault.setPerformanceFee(0, {"from": gov})
+    vault.setManagementFee(0, {"from": gov})
+
+    # if we have other strategies, set them to zero DR and remove them from the queue
+    if vault_address != ZERO_ADDRESS:
+        for i in range(0, 20):
+            strat_address = vault.withdrawalQueue(i)
+            if ZERO_ADDRESS == strat_address:
+                break
+
+            if vault.strategies(strat_address)["debtRatio"] > 0:
+                vault.updateStrategyDebtRatio(strat_address, 0, {"from": gov})
+                interface.ICurveStrategy045(strat_address).harvest({"from": gov})
+                vault.removeStrategyFromQueue(strat_address, {"from": gov})
+
+    vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
+
+    # turn our oracle into testing mode by setting the provider to 0x00, then forcing true
+    strategy.setBaseFeeOracle(base_fee_oracle, {"from": management})
+    base_fee_oracle.setBaseFeeProvider(ZERO_ADDRESS, {"from": management})
+    base_fee_oracle.setManualBaseFeeBool(True, {"from": management})
+    assert strategy.isBaseFeeAcceptable() == True
+
+    yield strategy
+
+
+# clone our strategy to use in our cloning and migration tests
+@pytest.fixture
+def new_strategy(
+    vault,
+    strategy,
+    strategist,
+    keeper,
+    rewards,
+    destination_vault,
     RouterStrategy,
     gov,
     health_check,
+    contract_name,
+    strategy_name,
 ):
-    strategy = strategist.deploy(
-        RouterStrategy, curve_susd_035, curve_susd_045, "Route yvCurve-sUSD 045"
+    tx = strategy.cloneRouterStrategy(
+        vault,
+        strategist,
+        rewards,
+        keeper,
+        destination_vault,
+        strategy_name,
     )
-    strategy.setKeeper(keeper)
-    strategy.setHealthCheck(health_check, {"from": curve_susd_035.governance()})
-
-    for i in range(0, 20):
-        strat_address = curve_susd_035.withdrawalQueue(i)
-        if ZERO_ADDRESS == strat_address:
-            break
-
-        if curve_susd_035.strategies(strat_address)["debtRatio"] > 0:
-            curve_susd_035.updateStrategyDebtRatio(strat_address, 0, {"from": gov})
-            Contract(strat_address).harvest({"from": gov})
-
-    curve_susd_035.setPerformanceFee(0, {"from": gov})
-    curve_susd_035.setManagementFee(0, {"from": gov})
-    curve_susd_035.addStrategy(strategy, 10_000, 0, 2**256 - 1, 0, {"from": gov})
-    curve_susd_035.setDepositLimit(0, {"from": gov})
-
-    yield strategy
+    new_strategy = contract_name.at(tx.return_value)
+    new_strategy.setHealthCheck(health_check, {"from": gov})
+    new_strategy.setDoHealthCheck(True, {"from": gov})
+    yield new_strategy
 
 
 @pytest.fixture
 def strategy_harvest(
     vault,
-    strategy,
     gov,
     token,
     whale,
@@ -255,42 +311,30 @@ def strategy_harvest(
     profit_amount,
     destination_vault,
     destination_strategy,
+    contract_name,
+    use_yswaps,
 ):
     def strategy_sub_harvest():
         # sleep and mine before a harvest
         chain.sleep(1)
         chain.mine(1)
 
+        # our strategy is the current attached strategy
+        strategy = contract_name.at(vault.withdrawalQueue(0))
+
         # if this is our first harvest, can keep it simple
         if strategy.estimatedTotalAssets() == 0:
             tx = strategy.harvest({"from": gov})
-            chain.sleep(1)
-            chain.mine(1)
-            # make sure we have funds and they're all invested
-            assert strategy.estimatedTotalAssets() > 0
-            assert strategy.balanceOfWant() == 0
-
-            ################## ROUTER-SPECIFIC SECTION BELOW ##################
-
-            # extra check for router
-            assert strategy.valueOfInvestment() > 0
-
-            ################## ROUTER-SPECIFIC SECTION ABOVE ##################
 
         else:
-            # make sure we have funds and they're all invested
-            assert strategy.estimatedTotalAssets() > 0
-            assert strategy.balanceOfWant() == 0
-
             ################## ROUTER-SPECIFIC SECTION BELOW ##################
 
-            # extra checks for router
-            assert strategy.valueOfInvestment() > 0
+            # send profits to our destination strategy, it's yswaps-based
+            token.transfer(destination_strategy, profit_amount, {"from": profit_whale})
             prev_value = strategy.valueOfInvestment()
 
             # have to harvest strategy to queue that profit in 0.4.6, donations to vault don't work
             # donate some profit to our destination strategy, we will do something similar in yswaps strategies
-            token.transfer(destination_strategy, profit_amount, {"from": profit_whale})
             dest_pps = destination_vault.pricePerShare()
             print("Destination PPS:", dest_pps / 1e18)
 
@@ -304,21 +348,34 @@ def strategy_harvest(
 
             dest_pps = destination_vault.pricePerShare()
             print("Destination PPS:", dest_pps / 1e18)
-            print("Destination Vault Harvest Profit:", tx.events["Harvested"]["profit"] / (10 ** token.decimals()))
+            print(
+                "Destination Vault Harvest Profit:",
+                tx.events["Harvested"]["profit"] / (10 ** token.decimals()),
+            )
 
-            # make sure we've profited
-            assert strategy.valueOfInvestment() > prev_value
+            # make sure we didn't lost vault value
+            assert strategy.valueOfInvestment() >= prev_value
 
             ################## ROUTER-SPECIFIC SECTION ABOVE ##################
 
+            # send profits to our strategy if using yswaps
+            if use_yswaps == True:
+                token.transfer(strategy, profit_amount, {"from": profit_whale})
+
             # harvest our strategy to take a profit
             tx = strategy.harvest({"from": gov})
-            print("Origin Vault Harvest Profit:", tx.events["Harvested"]["profit"] / (10 ** token.decimals()))
+            print(
+                "Harvest Profits:",
+                tx.events["Harvested"]["profit"] / (10 ** token.decimals()),
+            )
 
-            # make sure we had profits and no loss
+            # make sure we had a profit
             total_gain = vault.strategies(strategy).dict()["totalGain"]
             assert total_gain > 0
             assert vault.strategies(strategy).dict()["totalLoss"] == 0
+
+        # make sure there are no loose funds in strategy
+        assert strategy.balanceOfWant() == 0
 
         # print out our harvested event
         harvested = tx.events["Harvested"]
@@ -331,3 +388,108 @@ def strategy_harvest(
         return tx
 
     yield strategy_sub_harvest
+
+
+@pytest.fixture
+def strategy_harvest_lossy(
+    vault,
+    gov,
+    token,
+    whale,
+    profit_whale,
+    profit_amount,
+    destination_vault,
+    destination_strategy,
+    contract_name,
+):
+    def strategy_sub_harvest():
+        # sleep and mine before a harvest
+        chain.sleep(1)
+        chain.mine(1)
+
+        # our strategy is the current attached strategy
+        strategy = contract_name.at(vault.withdrawalQueue(0))
+
+        # if this is our first harvest, can keep it simple
+        if strategy.estimatedTotalAssets() == 0:
+            tx = strategy.harvest({"from": gov})
+
+        else:
+            ################## ROUTER-SPECIFIC SECTION BELOW ##################
+
+            # send profits to our destination strategy, it's yswaps-based
+            token.transfer(destination_strategy, profit_amount, {"from": profit_whale})
+            prev_value = strategy.valueOfInvestment()
+
+            # have to harvest strategy to queue that profit in 0.4.6, donations to vault don't work
+            # donate some profit to our destination strategy, we will do something similar in yswaps strategies
+            dest_pps = destination_vault.pricePerShare()
+            print("Destination PPS:", dest_pps / 1e18)
+
+            # harvest the destination strategy, turn off health check
+            destination_strategy.setDoHealthCheck(False, {"from": gov})
+            tx = destination_strategy.harvest({"from": gov})
+
+            # simulate five days of waiting for share price to bump back up
+            chain.sleep(86400 * 5)
+            chain.mine(1)
+
+            dest_pps = destination_vault.pricePerShare()
+            print("Destination PPS:", dest_pps / 1e18)
+            print(
+                "Destination Vault Harvest Profit:",
+                tx.events["Harvested"]["profit"] / (10 ** token.decimals()),
+            )
+
+            # make sure we didn't lost vault value
+            assert strategy.valueOfInvestment() >= prev_value
+
+            ################## ROUTER-SPECIFIC SECTION ABOVE ##################
+
+            # send profits to our strategy if using yswaps
+            if use_yswaps == True:
+                token.transfer(strategy, profit_amount, {"from": profit_whale})
+
+            # harvest our strategy to take a profit
+            tx = strategy.harvest({"from": gov})
+            print(
+                "Harvest Profits:",
+                tx.events["Harvested"]["profit"] / (10 ** token.decimals()),
+            )
+
+            # check our gains/losses
+            total_gain = vault.strategies(strategy).dict()["totalGain"]
+            total_loss = vault.strategies(strategy).dict()["totalLoss"]
+            print("Total Gain", total_gain, "Total Loss:", total_loss)
+
+        # make sure there are no loose funds in strategy
+        assert strategy.balanceOfWant() == 0
+
+        # print out our harvested event
+        harvested = tx.events["Harvested"]
+        print("Harvested:", harvested)
+
+        # sleep and mine at the end
+        chain.sleep(1)
+        chain.mine(1)
+        print("Harvest successful")
+        return tx
+
+    yield strategy_sub_harvest
+
+
+#################### FIXTURES ABOVE LIKELY NEED TO BE ADJUSTED FOR THIS REPO ####################
+
+####################         PUT UNIQUE FIXTURES FOR THIS REPO BELOW         ####################
+
+
+@pytest.fixture(scope="session")
+def destination_vault(interface):
+    # destination vault of the route
+    yield interface.IVaultFactory045("0x5b2384D566D2E4a0b29B8eccB642C63199cd393c")
+
+
+@pytest.fixture(scope="session")
+def destination_strategy(interface):
+    # destination strategy of the route
+    yield interface.ICurveStrategy045("0x83D0458e627cFD7C6d0da12a1223bd168e1c8B64")

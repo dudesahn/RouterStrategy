@@ -1,7 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-
 pragma solidity ^0.8.15;
-pragma experimental ABIEncoderV2;
 
 import "@yearnvaults/contracts/BaseStrategy.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
@@ -93,7 +91,7 @@ contract RouterStrategy is BaseStrategy {
 
     event Cloned(address indexed clone);
 
-    function cloneRouter(
+    function cloneRouterStrategy(
         address _vault,
         address _strategist,
         address _rewards,
@@ -272,6 +270,7 @@ contract RouterStrategy is BaseStrategy {
         unchecked {
             toWithdraw = _amountNeeded - balance;
         }
+
         _withdrawFromYVault(toWithdraw);
 
         uint256 looseWant = balanceOfWant();
@@ -314,12 +313,14 @@ contract RouterStrategy is BaseStrategy {
         override
         returns (uint256 _amountFreed)
     {
-        return
-            yVault.withdraw(
-                yVault.balanceOf(address(this)),
-                address(this),
-                maxLoss
-            );
+        // withdraw as much as we can from vault tokens
+        uint256 vaultTokenBalance = yVault.balanceOf(address(this));
+        if (vaultTokenBalance > 0) {
+            yVault.withdraw(vaultTokenBalance, address(this), maxLoss);
+        }
+
+        // return our want balance
+        return balanceOfWant();
     }
 
     function prepareMigration(address _newStrategy) internal virtual override {

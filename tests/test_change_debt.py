@@ -1,6 +1,7 @@
 import math
 import pytest
 import brownie
+from utils import harvest_strategy
 
 # test changing the debtRatio on a strategy and then harvesting it
 def test_change_debt(
@@ -15,13 +16,15 @@ def test_change_debt(
     sleep_time,
     is_slippery,
     no_profit,
-    strategy_harvest,
+    profit_whale,
+    profit_amount,
+    destination_strategy,
 ):
     ## deposit to the vault after approving
     startingWhale = token.balanceOf(whale)
     token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    harvest_tx = strategy_harvest()
+    (profit, loss) = harvest_strategy(False, strategy, token, gov, profit_whale, profit_amount, destination_strategy)
 
     # evaluate our current total assets
     old_assets = vault.totalAssets()
@@ -31,7 +34,7 @@ def test_change_debt(
     currentDebt = vault.strategies(strategy)["debtRatio"]
     vault.updateStrategyDebtRatio(strategy, currentDebt / 2, {"from": gov})
     chain.sleep(sleep_time)
-    harvest_tx = strategy_harvest()
+    (profit, loss) = harvest_strategy(False, strategy, token, gov, profit_whale, profit_amount, destination_strategy)
 
     assert strategy.estimatedTotalAssets() <= startingStrategy
 
@@ -41,7 +44,7 @@ def test_change_debt(
 
     # set DebtRatio back to 100%
     vault.updateStrategyDebtRatio(strategy, currentDebt, {"from": gov})
-    harvest_tx = strategy_harvest()
+    (profit, loss) = harvest_strategy(False, strategy, token, gov, profit_whale, profit_amount, destination_strategy)
 
     # evaluate our current total assets
     new_assets = vault.totalAssets()
@@ -77,13 +80,15 @@ def test_change_debt_with_profit(
     sleep_time,
     is_slippery,
     no_profit,
-    strategy_harvest,
+    profit_whale,
+    profit_amount,
+    destination_strategy,
 ):
 
     ## deposit to the vault after approving
     token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    harvest_report = strategy_harvest()
+    (profit, loss) = harvest_strategy(False, strategy, token, gov, profit_whale, profit_amount, destination_strategy)
 
     # store our values before we start doing weird stuff
     prev_params = vault.strategies(strategy)
@@ -97,7 +102,7 @@ def test_change_debt_with_profit(
 
     # turn off health check since we just took big profit
     strategy.setDoHealthCheck(False, {"from": gov})
-    harvest_report = strategy_harvest()
+    (profit, loss) = harvest_strategy(False, strategy, token, gov, profit_whale, profit_amount, destination_strategy)
     new_params = vault.strategies(strategy)
 
     # sleep 5 days hours to allow share price to normalize

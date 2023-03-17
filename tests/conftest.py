@@ -206,17 +206,13 @@ if chain_used == 1:  # mainnet
 
 
 @pytest.fixture(scope="module")
-def vault(
-    pm, gov, rewards, guardian, management, token, chain, vault_address, interface
-):
+def vault(pm, gov, rewards, guardian, management, token, vault_address, interface):
     if vault_address == ZERO_ADDRESS:
         Vault = pm(config["dependencies"][0]).Vault
         vault = guardian.deploy(Vault)
         vault.initialize(token, gov, rewards, "", "", guardian)
         vault.setDepositLimit(2 ** 256 - 1, {"from": gov})
         vault.setManagement(management, {"from": gov})
-        chain.sleep(1)
-        chain.mine(1)
     else:
         vault = interface.IVaultFactory045(vault_address)
     yield vault
@@ -244,8 +240,9 @@ def strategy(
     interface,
 ):
     strategy = strategist.deploy(contract_name, vault, destination_vault, strategy_name)
-    strategy.setKeeper(keeper, {"from": vault.governance()})
-    strategy.setHealthCheck(health_check, {"from": vault.governance()})
+    strategy.setKeeper(keeper, {"from": gov})
+    strategy.setHealthCheck(health_check, {"from": gov})
+    strategy.setDoHealthCheck(True, {"from": gov})
     vault.setPerformanceFee(0, {"from": gov})
     vault.setManagementFee(0, {"from": gov})
 
@@ -270,212 +267,6 @@ def strategy(
     assert strategy.isBaseFeeAcceptable() == True
 
     yield strategy
-
-
-# clone our strategy to use in our cloning and migration tests
-@pytest.fixture
-def new_strategy(
-    vault,
-    strategy,
-    strategist,
-    keeper,
-    rewards,
-    destination_vault,
-    RouterStrategy,
-    gov,
-    health_check,
-    contract_name,
-    strategy_name,
-):
-    tx = strategy.cloneRouterStrategy(
-        vault,
-        strategist,
-        rewards,
-        keeper,
-        destination_vault,
-        strategy_name,
-    )
-    new_strategy = contract_name.at(tx.return_value)
-    new_strategy.setHealthCheck(health_check, {"from": gov})
-    new_strategy.setDoHealthCheck(True, {"from": gov})
-    yield new_strategy
-
-
-@pytest.fixture
-def strategy_harvest(
-    vault,
-    gov,
-    token,
-    whale,
-    profit_whale,
-    profit_amount,
-    destination_vault,
-    destination_strategy,
-    contract_name,
-    use_yswaps,
-):
-    def strategy_sub_harvest():
-        # sleep and mine before a harvest
-        chain.sleep(1)
-        chain.mine(1)
-
-        # our strategy is the current attached strategy
-        strategy = contract_name.at(vault.withdrawalQueue(0))
-
-        # if this is our first harvest, can keep it simple
-        if strategy.estimatedTotalAssets() == 0:
-            tx = strategy.harvest({"from": gov})
-
-        else:
-            ################## ROUTER-SPECIFIC SECTION BELOW ##################
-
-            # send profits to our destination strategy, it's yswaps-based
-            token.transfer(destination_strategy, profit_amount, {"from": profit_whale})
-            prev_value = strategy.valueOfInvestment()
-
-            # have to harvest strategy to queue that profit in 0.4.6, donations to vault don't work
-            # donate some profit to our destination strategy, we will do something similar in yswaps strategies
-            dest_pps = destination_vault.pricePerShare()
-            print("Destination PPS:", dest_pps / 1e18)
-
-            # harvest the destination strategy, turn off health check
-            destination_strategy.setDoHealthCheck(False, {"from": gov})
-            tx = destination_strategy.harvest({"from": gov})
-
-            # simulate five days of waiting for share price to bump back up
-            chain.sleep(86400 * 5)
-            chain.mine(1)
-
-            dest_pps = destination_vault.pricePerShare()
-            print("Destination PPS:", dest_pps / 1e18)
-            print(
-                "Destination Vault Harvest Profit:",
-                tx.events["Harvested"]["profit"] / (10 ** token.decimals()),
-            )
-
-            # make sure we didn't lost vault value
-            assert strategy.valueOfInvestment() >= prev_value
-
-            ################## ROUTER-SPECIFIC SECTION ABOVE ##################
-
-            # send profits to our strategy if using yswaps
-            if use_yswaps == True:
-                token.transfer(strategy, profit_amount, {"from": profit_whale})
-
-            # harvest our strategy to take a profit
-            tx = strategy.harvest({"from": gov})
-            print(
-                "Harvest Profits:",
-                tx.events["Harvested"]["profit"] / (10 ** token.decimals()),
-            )
-
-            # make sure we had a profit
-            total_gain = vault.strategies(strategy).dict()["totalGain"]
-            assert total_gain > 0
-            assert vault.strategies(strategy).dict()["totalLoss"] == 0
-
-        # make sure there are no loose funds in strategy
-        assert strategy.balanceOfWant() == 0
-
-        # print out our harvested event
-        harvested = tx.events["Harvested"]
-        print("Harvested:", harvested)
-
-        # sleep and mine at the end
-        chain.sleep(1)
-        chain.mine(1)
-        print("Harvest successful")
-        return tx
-
-    yield strategy_sub_harvest
-
-
-@pytest.fixture
-def strategy_harvest_lossy(
-    vault,
-    gov,
-    token,
-    whale,
-    profit_whale,
-    profit_amount,
-    destination_vault,
-    destination_strategy,
-    contract_name,
-):
-    def strategy_sub_harvest():
-        # sleep and mine before a harvest
-        chain.sleep(1)
-        chain.mine(1)
-
-        # our strategy is the current attached strategy
-        strategy = contract_name.at(vault.withdrawalQueue(0))
-
-        # if this is our first harvest, can keep it simple
-        if strategy.estimatedTotalAssets() == 0:
-            tx = strategy.harvest({"from": gov})
-
-        else:
-            ################## ROUTER-SPECIFIC SECTION BELOW ##################
-
-            # send profits to our destination strategy, it's yswaps-based
-            token.transfer(destination_strategy, profit_amount, {"from": profit_whale})
-            prev_value = strategy.valueOfInvestment()
-
-            # have to harvest strategy to queue that profit in 0.4.6, donations to vault don't work
-            # donate some profit to our destination strategy, we will do something similar in yswaps strategies
-            dest_pps = destination_vault.pricePerShare()
-            print("Destination PPS:", dest_pps / 1e18)
-
-            # harvest the destination strategy, turn off health check
-            destination_strategy.setDoHealthCheck(False, {"from": gov})
-            tx = destination_strategy.harvest({"from": gov})
-
-            # simulate five days of waiting for share price to bump back up
-            chain.sleep(86400 * 5)
-            chain.mine(1)
-
-            dest_pps = destination_vault.pricePerShare()
-            print("Destination PPS:", dest_pps / 1e18)
-            print(
-                "Destination Vault Harvest Profit:",
-                tx.events["Harvested"]["profit"] / (10 ** token.decimals()),
-            )
-
-            # make sure we didn't lost vault value
-            assert strategy.valueOfInvestment() >= prev_value
-
-            ################## ROUTER-SPECIFIC SECTION ABOVE ##################
-
-            # send profits to our strategy if using yswaps
-            if use_yswaps == True:
-                token.transfer(strategy, profit_amount, {"from": profit_whale})
-
-            # harvest our strategy to take a profit
-            tx = strategy.harvest({"from": gov})
-            print(
-                "Harvest Profits:",
-                tx.events["Harvested"]["profit"] / (10 ** token.decimals()),
-            )
-
-            # check our gains/losses
-            total_gain = vault.strategies(strategy).dict()["totalGain"]
-            total_loss = vault.strategies(strategy).dict()["totalLoss"]
-            print("Total Gain", total_gain, "Total Loss:", total_loss)
-
-        # make sure there are no loose funds in strategy
-        assert strategy.balanceOfWant() == 0
-
-        # print out our harvested event
-        harvested = tx.events["Harvested"]
-        print("Harvested:", harvested)
-
-        # sleep and mine at the end
-        chain.sleep(1)
-        chain.mine(1)
-        print("Harvest successful")
-        return tx
-
-    yield strategy_sub_harvest
 
 
 #################### FIXTURES ABOVE LIKELY NEED TO BE ADJUSTED FOR THIS REPO ####################

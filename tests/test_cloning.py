@@ -16,13 +16,11 @@ def test_cloning(
     sleep_time,
     is_slippery,
     no_profit,
-    strategy_harvest,
     contract_name,
     is_clonable,
     tests_using_tenderly,
     strategy_name,
     destination_vault,
-    new_strategy,
 ):
 
     # skip this test if we don't clone
@@ -33,8 +31,23 @@ def test_cloning(
     startingWhale = token.balanceOf(whale)
     token.approve(vault, 2 ** 256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    harvest_tx = strategy_harvest()
+    chain.sleep(1)
+    chain.mine(1)
+    tx = strategy.harvest({'from': gov})
+    chain.sleep(1)
+    chain.mine(1)
     before_pps = vault.pricePerShare()
+    
+    # clone our strategy
+    tx = strategy.cloneRouterStrategy(
+        vault,
+        strategist,
+        rewards,
+        keeper,
+        destination_vault,
+        strategy_name,
+    )
+    new_strategy = contract_name.at(tx.return_value)
 
     # tenderly doesn't work for "with brownie.reverts"
     if tests_using_tenderly == False:
@@ -76,7 +89,11 @@ def test_cloning(
 
     # revoke, get funds back into vault, remove old strat from queue
     vault.revokeStrategy(strategy, {"from": gov})
-    harvest_tx = strategy_harvest()
+    chain.sleep(1)
+    chain.mine(1)
+    tx = strategy.harvest({'from': gov})
+    chain.sleep(1)
+    chain.mine(1)
     vault.removeStrategyFromQueue(strategy.address, {"from": gov})
 
     # attach our new strategy, ensure it's the only one
@@ -89,7 +106,11 @@ def test_cloning(
     assert vault.strategies(strategy)["debtRatio"] == 0
 
     # harvest, store asset amount
-    harvest_tx = strategy_harvest()
+    chain.sleep(1)
+    chain.mine(1)
+    tx = new_strategy.harvest({'from': gov})
+    chain.sleep(1)
+    chain.mine(1)
     old_assets = vault.totalAssets()
     assert old_assets > 0
     assert token.balanceOf(new_strategy) == 0
@@ -103,7 +124,11 @@ def test_cloning(
     chain.mine(1)
 
     # harvest after a day, store new asset amount
-    harvest_tx = strategy_harvest()
+    chain.sleep(1)
+    chain.mine(1)
+    tx = new_strategy.harvest({'from': gov})
+    chain.sleep(1)
+    chain.mine(1)
     new_assets = vault.totalAssets()
 
     # we can't use strategyEstimated Assets because the profits are sent to the vault

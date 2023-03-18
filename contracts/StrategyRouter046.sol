@@ -48,7 +48,7 @@ interface IHelper {
         returns (uint256);
 }
 
-contract RouterStrategy is BaseStrategy {
+contract StrategyRouter046 is BaseStrategy {
     using SafeERC20 for IERC20;
 
     /* ========== STATE VARIABLES ========== */

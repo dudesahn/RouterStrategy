@@ -117,7 +117,7 @@ contract StrategyRouter046 is BaseStrategy {
             newStrategy := create(0, clone_code, 0x37)
         }
 
-        RouterStrategy(newStrategy).initialize(
+        StrategyRouter046(newStrategy).initialize(
             _vault,
             _strategist,
             _rewards,
@@ -147,6 +147,8 @@ contract StrategyRouter046 is BaseStrategy {
     {
         yVault = IVault(_yVault);
         strategyName = _strategyName;
+        harvestProfitMinInUsdc = 5_000e6;
+        harvestProfitMaxInUsdc = 50_000e6;
     }
 
     /* ========== VIEWS ========== */
@@ -168,6 +170,7 @@ contract StrategyRouter046 is BaseStrategy {
     }
 
     /// @notice Assets delegated to another vault. Helps to avoid double-counting of TVL.
+    /// @dev While a strategy could have loose want, this would only come from donations, and thus is not counted here.
     function delegatedAssets() public view override returns (uint256) {
         return vault.strategies(address(this)).totalDebt;
     }
@@ -188,7 +191,18 @@ contract StrategyRouter046 is BaseStrategy {
 
     /// @notice Balance of underlying we will gain on our next harvest
     function claimableProfits() public view returns (uint256) {
-        return valueOfInvestment() - (delegatedAssets() - balanceOfWant());
+        // see if our destination vault has earned anything, store in memory for gas savings
+        uint256 _investmentValue = valueOfInvestment();
+
+        // any loose want in strategy will be treated as assets (profit) on the next harvest
+        uint256 _debtDelegated = delegatedAssets() - balanceOfWant();
+
+        // don't want to overflow from conversion between underlying and vault shares
+        if (_investmentValue > _debtDelegated) {
+            return _investmentValue - _debtDelegated;
+        } else {
+            return 0;
+        }
     }
 
     /* ========== CORE STRATEGY FUNCTIONS ========== */
@@ -203,39 +217,38 @@ contract StrategyRouter046 is BaseStrategy {
             uint256 _debtPayment
         )
     {
-        uint256 _totalDebt = vault.strategies(address(this)).totalDebt;
-        uint256 _totalAsset = estimatedTotalAssets();
+        // serious loss should never happen, but if it does, let's record it accurately
+        uint256 assets = estimatedTotalAssets();
+        uint256 debt = vault.strategies(address(this)).totalDebt;
 
-        // Estimate the profit we have so far
-        if (_totalDebt <= _totalAsset) {
+        // if assets are greater than debt, things are working great!
+        if (assets >= debt) {
             unchecked {
-                _profit = _totalAsset - _totalDebt;
+                _profit = assets - debt;
+            }
+            _debtPayment = _debtOutstanding;
+
+            uint256 toFree = _profit + _debtPayment;
+
+            // freed is math.min(wantBalance, toFree)
+            (uint256 freed, ) = liquidatePosition(toFree);
+
+            if (toFree > freed) {
+                if (_debtPayment > freed) {
+                    _debtPayment = freed;
+                    _profit = 0;
+                } else {
+                    unchecked {
+                        _profit = freed - _debtPayment;
+                    }
+                }
             }
         }
-
-        // We take profit and debt
-        uint256 _amountFreed;
-        (_amountFreed, _loss) = liquidatePosition(_debtOutstanding + _profit);
-        _debtPayment = Math.min(_debtOutstanding, _amountFreed);
-
-        if (_loss > _profit) {
-            // Example:
-            // debtOutstanding 100, profit 40, _amountFreed 100, _loss 50
-            // loss should be 10, (50-40)
-            // profit should endup in 0
+        // if assets are less than debt, we are in trouble. don't worry about withdrawing here, just report losses
+        else {
             unchecked {
-                _loss = _loss - _profit;
+                _loss = debt - assets;
             }
-            _profit = 0;
-        } else {
-            // Example:
-            // debtOutstanding 100, profit 50, _amountFreed 140, _loss 10
-            // _profit should be 40, (50 profit - 10 loss)
-            // loss should end up in be 0
-            unchecked {
-                _profit = _profit - _loss;
-            }
-            _loss = 0;
         }
     }
 
@@ -340,6 +353,17 @@ contract StrategyRouter046 is BaseStrategy {
         ret[0] = address(yVault);
     }
 
+    function _checkAllowance(
+        address _contract,
+        address _token,
+        uint256 _amount
+    ) internal {
+        if (IERC20(_token).allowance(address(this), _contract) < _amount) {
+            IERC20(_token).safeApprove(_contract, 0);
+            IERC20(_token).safeApprove(_contract, type(uint256).max);
+        }
+    }
+
     /// @notice Convert our keeper's eth cost into want
     /// @dev We don't use this since we don't factor call cost into our harvestTrigger.
     /// @param _amtInWei Amount of ether spent.
@@ -360,7 +384,7 @@ contract StrategyRouter046 is BaseStrategy {
      * @notice
      *  Provide a signal to the keeper that harvest() should be called.
      *
-     *  Don't harvest if a strategy is inactive, or if it needs an earmark first.
+     *  Don't harvest if a strategy is inactive.
      *  If our profit exceeds our upper limit, then harvest no matter what. For
      *  our lower profit limit, credit threshold, max delay, and manual force trigger,
      *  only harvest if our gas price is acceptable.
@@ -428,6 +452,9 @@ contract StrategyRouter046 is BaseStrategy {
         return (claimableProfits() * underlyingPrice) / (10**yVault.decimals());
     }
 
+    /* ========== SETTERS ========== */
+    // These functions are useful for setting parameters of the strategy that may need to be adjusted.
+
     /// @notice Set the maximum loss we will accept (due to slippage or locked funds) on a vault withdrawal.
     /// @dev Generally, this should be zero, and this function will only be used in special/emergency cases.
     /// @param _maxLoss Max percentage loss we will take, in basis points (100% = 10_000).
@@ -435,14 +462,19 @@ contract StrategyRouter046 is BaseStrategy {
         maxLoss = _maxLoss;
     }
 
-    function _checkAllowance(
-        address _contract,
-        address _token,
-        uint256 _amount
-    ) internal {
-        if (IERC20(_token).allowance(address(this), _contract) < _amount) {
-            IERC20(_token).safeApprove(_contract, 0);
-            IERC20(_token).safeApprove(_contract, type(uint256).max);
-        }
+    /**
+     * @notice
+     *  Here we set various parameters to optimize our harvestTrigger.
+     * @param _harvestProfitMinInUsdc The amount of profit (in USDC, 6 decimals)
+     *  that will trigger a harvest if gas price is acceptable.
+     * @param _harvestProfitMaxInUsdc The amount of profit in USDC that
+     *  will trigger a harvest regardless of gas price.
+     */
+    function setHarvestTriggerParams(
+        uint256 _harvestProfitMinInUsdc,
+        uint256 _harvestProfitMaxInUsdc
+    ) external onlyVaultManagers {
+        harvestProfitMinInUsdc = _harvestProfitMinInUsdc;
+        harvestProfitMaxInUsdc = _harvestProfitMaxInUsdc;
     }
 }

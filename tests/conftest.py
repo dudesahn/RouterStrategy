@@ -1,5 +1,5 @@
 import pytest
-from brownie import config, Contract, ZERO_ADDRESS, chain, interface
+from brownie import config, Contract, ZERO_ADDRESS, chain, interface, accounts
 from eth_abi import encode_single
 import requests
 
@@ -38,13 +38,13 @@ def tenderly_fork(web3, chain):
 
 
 @pytest.fixture(scope="session")
-def token(interface):
+def token():
     token_address = "0xC25a3A3b969415c80451098fa907EC722572917F"  # this should be the address of the ERC-20 used by the strategy/vault (curve sUSD)
     yield interface.IERC20(token_address)
 
 
 @pytest.fixture(scope="session")
-def whale(accounts, amount, token):
+def whale(amount, token):
     # Totally in it for the tech
     # Update this with a large holder of your want token (the largest EOA holder of LP)
     whale = accounts.at(
@@ -64,7 +64,7 @@ def amount(token):
 
 
 @pytest.fixture(scope="session")
-def profit_whale(accounts, profit_amount, token):
+def profit_whale(profit_amount, token):
     # ideally not the same whale as the main whale, or else they will lose money
     profit_whale = accounts.at(
         "0x5BB622ba7b2F09BF23F1a9b509cd210A818c53d7", force=True
@@ -89,17 +89,24 @@ def vault_address():
     yield vault_address
 
 
+# if our vault is pre-0.4.3, this will affect a few things
+@pytest.fixture(scope="session")
+def old_vault():
+    old_vault = True
+    yield old_vault
+
+
 # this is the name we want to give our strategy
 @pytest.fixture(scope="session")
 def strategy_name():
-    strategy_name = "RouterStrategy046"
+    strategy_name = "StrategyRouter046"
     yield strategy_name
 
 
 # this is the name of our strategy in the .sol file
 @pytest.fixture(scope="session")
-def contract_name(RouterStrategy):
-    contract_name = RouterStrategy
+def contract_name(StrategyRouter046):
+    contract_name = StrategyRouter046
     yield contract_name
 
 
@@ -158,29 +165,32 @@ def tests_using_tenderly():
     yield yes_or_no
 
 
+# by default, pytest uses decimals, but in solidity we use uints, so 10 actually equals 10 wei (1e-17 for most assets, or 1e-6 for USDC/USDT)
 @pytest.fixture(scope="session")
-def RELATIVE_APPROX():
-    yield 1e-5
+def RELATIVE_APPROX(token):
+    approx = 10
+    print("Approx:", approx, "wei")
+    yield approx
 
 
 # use this to set various fixtures that differ by chain
 if chain_used == 1:  # mainnet
 
     @pytest.fixture(scope="session")
-    def gov(accounts):
+    def gov():
         yield accounts.at("0xFEB4acf3df3cDEA7399794D0869ef76A6EfAff52", force=True)
 
     @pytest.fixture(scope="session")
-    def health_check(interface):
+    def health_check():
         yield interface.IHealthCheck("0xddcea799ff1699e98edf118e0629a974df7df012")
 
     @pytest.fixture(scope="session")
-    def base_fee_oracle(interface):
+    def base_fee_oracle():
         yield interface.IBaseFeeOracle("0xfeCA6895DcF50d6350ad0b5A8232CF657C316dA7")
 
     # set all of the following to SMS, just simpler
     @pytest.fixture(scope="session")
-    def management(accounts):
+    def management():
         yield accounts.at("0x16388463d60FFE0661Cf7F1f31a7D658aC790ff7", force=True)
 
     @pytest.fixture(scope="session")
@@ -200,13 +210,21 @@ if chain_used == 1:  # mainnet
         yield management
 
     @pytest.fixture(scope="session")
-    def to_sweep(interface):
+    def to_sweep():
         # token we can sweep out of strategy (use CRV)
         yield interface.IERC20("0xD533a949740bb3306d119CC777fa900bA034cd52")
 
+    @pytest.fixture(scope="session")
+    def trade_factory():
+        yield Contract("0xcADBA199F3AC26F67f660C89d43eB1820b7f7a3b")
+
+    @pytest.fixture(scope="session")
+    def keeper_wrapper():
+        yield Contract("0x0D26E894C2371AB6D20d99A65E991775e3b5CAd7")
+
 
 @pytest.fixture(scope="module")
-def vault(pm, gov, rewards, guardian, management, token, vault_address, interface):
+def vault(pm, gov, rewards, guardian, management, token, vault_address):
     if vault_address == ZERO_ADDRESS:
         Vault = pm(config["dependencies"][0]).Vault
         vault = guardian.deploy(Vault)
@@ -228,8 +246,6 @@ def strategy(
     strategist,
     keeper,
     vault,
-    destination_vault,
-    RouterStrategy,
     gov,
     management,
     health_check,
@@ -237,9 +253,12 @@ def strategy(
     strategy_name,
     base_fee_oracle,
     vault_address,
-    interface,
+    trade_factory,
+    destination_vault,
 ):
-    strategy = strategist.deploy(contract_name, vault, destination_vault, strategy_name)
+    # will need to update this based on the strategy's constructor ******
+    strategy = gov.deploy(contract_name, vault, destination_vault, strategy_name)
+
     strategy.setKeeper(keeper, {"from": gov})
     strategy.setHealthCheck(health_check, {"from": gov})
     strategy.setDoHealthCheck(True, {"from": gov})
@@ -281,6 +300,6 @@ def destination_vault(interface):
 
 
 @pytest.fixture(scope="session")
-def destination_strategy(interface):
+def destination_strategy():
     # destination strategy of the route
     yield interface.ICurveStrategy045("0x83D0458e627cFD7C6d0da12a1223bd168e1c8B64")

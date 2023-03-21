@@ -91,7 +91,7 @@ def test_migration(
 
     # Test out our migrated strategy, confirm we're making a profit
     (profit, loss) = harvest_strategy(
-        True,
+        use_yswaps,
         new_strategy,
         token,
         gov,

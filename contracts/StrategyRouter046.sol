@@ -91,6 +91,13 @@ contract StrategyRouter046 is BaseStrategy {
 
     event Cloned(address indexed clone);
 
+    /// @notice Use this to clone an exact copy of this strategy on another vault.
+    /// @param _vault Vault address we want to attach our new strategy to.
+    /// @param _strategist Address to grant the strategist role.
+    /// @param _rewards If we have any strategist rewards, send them here.
+    /// @param _keeper Address to grant the keeper role.
+    /// @param _yVault The newer vault we will route our funds to.
+    /// @param _strategyName Name to use for our new strategy.
     function cloneRouterStrategy(
         address _vault,
         address _strategist,
@@ -297,6 +304,9 @@ contract StrategyRouter046 is BaseStrategy {
         }
     }
 
+    /// @notice Manually withdraw underlying assets from our target vault.
+    /// @dev Only governance or management may call this.
+    /// @param _amount Shares of our target vault to withdraw.
     function withdrawFromYVault(uint256 _amount) external onlyVaultManagers {
         _withdrawFromYVault(_amount);
     }
@@ -348,10 +358,7 @@ contract StrategyRouter046 is BaseStrategy {
         view
         override
         returns (address[] memory ret)
-    {
-        ret = new address[](1);
-        ret[0] = address(yVault);
-    }
+    {}
 
     function _checkAllowance(
         address _contract,

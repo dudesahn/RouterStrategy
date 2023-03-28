@@ -1,6 +1,5 @@
 import pytest
-from brownie import config, Contract, ZERO_ADDRESS, chain, interface, accounts
-from eth_abi import encode_single
+from brownie import config, ZERO_ADDRESS, chain, interface, accounts
 import requests
 
 
@@ -216,11 +215,13 @@ if chain_used == 1:  # mainnet
 
     @pytest.fixture(scope="session")
     def trade_factory():
-        yield Contract("0xcADBA199F3AC26F67f660C89d43eB1820b7f7a3b")
+        yield interface.ITradeHandler("0xcADBA199F3AC26F67f660C89d43eB1820b7f7a3b")
 
     @pytest.fixture(scope="session")
     def keeper_wrapper():
-        yield Contract("0x0D26E894C2371AB6D20d99A65E991775e3b5CAd7")
+        yield interface.IFactoryKeeperWrapper(
+            "0x0D26E894C2371AB6D20d99A65E991775e3b5CAd7"
+        )
 
 
 @pytest.fixture(scope="module")

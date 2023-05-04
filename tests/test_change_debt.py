@@ -15,22 +15,23 @@ def test_change_debt(
     no_profit,
     profit_whale,
     profit_amount,
-    destination_strategy,
+    target,
     use_yswaps,
     RELATIVE_APPROX,
+    is_gmx,
 ):
     ## deposit to the vault after approving
     starting_whale = token.balanceOf(whale)
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    (profit, loss) = harvest_strategy(
+    (profit, loss, extra) = harvest_strategy(
         use_yswaps,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
-        destination_strategy,
+        target,
     )
 
     # check our current status
@@ -61,14 +62,14 @@ def test_change_debt(
     assert vault.creditAvailable(strategy) == 0
 
     # harvest to reduce our debt, send 50% of funds back to vault
-    (profit, loss) = harvest_strategy(
+    (profit, loss, extra) = harvest_strategy(
         use_yswaps,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
-        destination_strategy,
+        target,
     )
 
     # check our current status
@@ -77,8 +78,8 @@ def test_change_debt(
 
     # debtOutstanding should be zero, credit available will be much lower than 50% of vault but greater than zero (profits)
     assert vault.debtOutstanding(strategy) == 0
-    # yswaps will not have taken this first batch of profit yet
-    if use_yswaps:
+    # yswaps will not have taken this first batch of profit yet, neither will gmx
+    if use_yswaps or is_gmx:
         assert vault.creditAvailable(strategy) == 0
         assert strategy_params["totalGain"] == 0
     else:
@@ -94,11 +95,16 @@ def test_change_debt(
     # no loss should have happened just by reducing the debt
     assert strategy_params["totalLoss"] == 0
 
-    # make sure we reduced our assets properly, yswaps will also have profit sitting in strategy
+    # make sure we reduced our assets properly, yswaps will also have profit sitting in strategy. gmx strats will have profit amount added of "loose" want
     if use_yswaps:
         assert (
             pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX)
             == initial_strategy_assets / 2 + profit_amount
+        )
+    elif is_gmx:
+        assert (
+            pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX)
+            == initial_strategy_assets / 2 + extra
         )
     else:
         assert (
@@ -130,30 +136,31 @@ def test_change_debt(
     )
 
     # harvest to send our funds back to the strategy
-    (profit, loss) = harvest_strategy(
+    (profit, loss, extra) = harvest_strategy(
         use_yswaps,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
-        destination_strategy,
+        target,
     )
+    print("Profit from our third harvest:", profit)
+    assert profit > 0
 
     # check our current status
     print("\nAfter harvest to return DR to 100%")
     strategy_params = check_status(strategy, vault)
 
-    ################# SET FALSE IF PROFIT EXPECTED HERE. ADJUST AS NEEDED. #################
-    # set this true if no profit on this test. it is normal for a strategy to not generate profit here.
-    # realistically only wrapped tokens or every-block earners will see profits.
-    no_profit_here = False
+    ################# SET FALSE IF PROFIT EXPECTED. ADJUST AS NEEDED. #################
+    # set this true if no profit on this test. should be rare but does happen.
+    no_profit = False
 
     # debtOutstanding should be zero, credit available will be much lower than previously but greater than zero (profits)
     # however, if the strategy has no profit, or has inconsistent profit-taking, then we can have no credit here
     # also checked in test_emergency_exit_with_no_loss
     assert vault.debtOutstanding(strategy) == 0
-    if no_profit or no_profit_here:
+    if no_profit:
         vault.creditAvailable(strategy) == 0
     else:
         assert 0 < vault.creditAvailable(strategy) < vault.totalAssets() / 2
@@ -162,10 +169,10 @@ def test_change_debt(
     new_assets = vault.totalAssets()
 
     # confirm we made money, or at least that we have about the same
-    if is_slippery and no_profit:
+    if no_profit:
         assert pytest.approx(new_assets, rel=RELATIVE_APPROX) == old_assets
     else:
-        assert new_assets >= old_assets
+        assert new_assets > old_assets
 
     # simulate five days of waiting for share price to bump back up
     chain.sleep(86400 * 5)
@@ -176,7 +183,7 @@ def test_change_debt(
     strategy_params = check_status(strategy, vault)
 
     # share price should have gone up, without loss except for special cases
-    if is_slippery and no_profit:
+    if no_profit:
         assert (
             pytest.approx(vault.pricePerShare(), rel=RELATIVE_APPROX)
             == starting_share_price
@@ -187,12 +194,12 @@ def test_change_debt(
 
     # withdraw and confirm we made money, or at least that we have about the same (profit whale has to be different from normal whale)
     vault.withdraw({"from": whale})
-    if is_slippery and no_profit:
+    if no_profit:
         assert (
             pytest.approx(token.balanceOf(whale), rel=RELATIVE_APPROX) == starting_whale
         )
     else:
-        assert token.balanceOf(whale) >= starting_whale
+        assert token.balanceOf(whale) > starting_whale
 
 
 # test changing the debtRatio on a strategy, donating some assets, and then harvesting it
@@ -208,21 +215,22 @@ def test_change_debt_with_profit(
     no_profit,
     profit_whale,
     profit_amount,
-    destination_strategy,
+    target,
     use_yswaps,
     RELATIVE_APPROX,
+    is_gmx,
 ):
     ## deposit to the vault after approving
-    token.approve(vault, 2 ** 256 - 1, {"from": whale})
+    token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
-    (profit, loss) = harvest_strategy(
+    (profit, loss, extra) = harvest_strategy(
         use_yswaps,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
-        destination_strategy,
+        target,
     )
 
     # check our current status
@@ -269,14 +277,14 @@ def test_change_debt_with_profit(
     assert strategy_params["totalDebt"] == initial_debt
 
     # harvest to reduce our debt, send 50% of funds back to vault
-    (profit, loss) = harvest_strategy(
+    (profit, loss, extra) = harvest_strategy(
         use_yswaps,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
-        destination_strategy,
+        target,
     )
 
     # check our current status
@@ -305,11 +313,16 @@ def test_change_debt_with_profit(
         == initial_debt / 2
     )
 
-    # make sure we reduced our assets properly, yswaps will also have profit sitting in strategy
+    # make sure we reduced our assets properly, yswaps will also have profit sitting in strategy. gmx strats will have profit amount added of "loose" want
     if use_yswaps:
         assert (
             pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX)
             == initial_strategy_assets / 2 + profit_amount
+        )
+    elif is_gmx:
+        assert (
+            pytest.approx(strategy.estimatedTotalAssets(), rel=RELATIVE_APPROX)
+            == initial_strategy_assets / 2 + extra
         )
     else:
         assert (
@@ -326,7 +339,7 @@ def test_change_debt_with_profit(
     strategy_params = check_status(strategy, vault)
 
     # share price should have gone up, without loss except for special cases
-    if is_slippery and no_profit:
+    if no_profit:
         assert (
             pytest.approx(vault.pricePerShare(), rel=RELATIVE_APPROX)
             == starting_share_price
@@ -341,7 +354,7 @@ def test_change_debt_with_profit(
     # specifically check that our profit is greater than our donation or at least no more than 10 wei if we get slippage on deposit/withdrawal
     # yswaps also will not have seen profit from the first donation after only one harvest
     profit = new_params["totalGain"] - prev_params["totalGain"]
-    if is_slippery and no_profit or use_yswaps:
+    if is_slippery and no_profit or use_yswaps or is_gmx:
         assert pytest.approx(profit, rel=RELATIVE_APPROX) == donation
     else:
         assert profit > donation
@@ -360,13 +373,10 @@ def test_change_debt_with_profit(
     # we multiply this by the debtRatio of our strategy out of 10_000 total
     # a vault only knows it has assets if the strategy has reported. yswaps has extra profit donated to the strategy as well that has not yet been reported.
     if use_yswaps:
-        assert (
-            pytest.approx(
-                vault.totalAssets() * new_params["debtRatio"] / 10_000 + profit_amount,
-                rel=RELATIVE_APPROX,
-            )
-            == strategy.estimatedTotalAssets() + vault.creditAvailable(strategy)
-        )
+        assert pytest.approx(
+            vault.totalAssets() * new_params["debtRatio"] / 10_000 + profit_amount,
+            rel=RELATIVE_APPROX,
+        ) == strategy.estimatedTotalAssets() + vault.creditAvailable(strategy)
     else:
         assert pytest.approx(
             vault.totalAssets() * new_params["debtRatio"] / 10_000, rel=RELATIVE_APPROX

@@ -48,7 +48,7 @@ interface IHelper {
         returns (uint256);
 }
 
-contract StrategyRouter046 is BaseStrategy {
+contract StrategyRouterV2 is BaseStrategy {
     using SafeERC20 for IERC20;
 
     /* ========== STATE VARIABLES ========== */
@@ -70,6 +70,9 @@ contract StrategyRouter046 is BaseStrategy {
     /// @notice Maximum profit size in USDC that we want to harvest (ignore gas price once we get here).
     /// @dev Only used in harvestTrigger.
     uint256 public harvestProfitMaxInUsdc;
+
+    /// @notice Amount we accept as a loss in liquidatePosition if we don't get 100% back due to rounding errors.
+    uint256 public dustThreshold;
 
     /// @notice Will only be true on the original deployed contract and not on clones; we don't want to clone a clone.
     bool public isOriginal = true;
@@ -124,7 +127,7 @@ contract StrategyRouter046 is BaseStrategy {
             newStrategy := create(0, clone_code, 0x37)
         }
 
-        StrategyRouter046(newStrategy).initialize(
+        StrategyRouterV2(newStrategy).initialize(
             _vault,
             _strategist,
             _rewards,
@@ -144,8 +147,8 @@ contract StrategyRouter046 is BaseStrategy {
         address _yVault,
         string memory _strategyName
     ) public {
-        _initialize(_vault, _strategist, _rewards, _keeper);
         require(address(yVault) == address(0));
+        _initialize(_vault, _strategist, _rewards, _keeper);
         _initializeThis(_yVault, _strategyName);
     }
 
@@ -156,6 +159,7 @@ contract StrategyRouter046 is BaseStrategy {
         strategyName = _strategyName;
         harvestProfitMinInUsdc = 5_000e6;
         harvestProfitMaxInUsdc = 50_000e6;
+        dustThreshold = 10;
     }
 
     /* ========== VIEWS ========== */
@@ -177,7 +181,8 @@ contract StrategyRouter046 is BaseStrategy {
     }
 
     /// @notice Assets delegated to another vault. Helps to avoid double-counting of TVL.
-    /// @dev While a strategy could have loose want, this would only come from donations, and thus is not counted here.
+    /// @dev While a strategy may have loose want, only donations would be unaccounted for, and thus are not counted here.
+    ///  Note that a strategy could also have loose want from a manual withdrawFromYVault() call.
     function delegatedAssets() public view override returns (uint256) {
         return vault.strategies(address(this)).totalDebt;
     }
@@ -197,18 +202,16 @@ contract StrategyRouter046 is BaseStrategy {
     }
 
     /// @notice Balance of underlying we will gain on our next harvest
-    function claimableProfits() public view returns (uint256) {
-        // see if our destination vault has earned anything, store in memory for gas savings
-        uint256 _investmentValue = valueOfInvestment();
+    function claimableProfits() public view returns (uint256 profits) {
+        uint256 assets = estimatedTotalAssets();
+        uint256 debt = delegatedAssets();
 
-        // any loose want in strategy will be treated as assets (profit) on the next harvest
-        uint256 _debtDelegated = delegatedAssets() - balanceOfWant();
-
-        // don't want to overflow from conversion between underlying and vault shares
-        if (_investmentValue > _debtDelegated) {
-            return _investmentValue - _debtDelegated;
+        if (assets > debt) {
+            unchecked {
+                profits = assets - debt;
+            }
         } else {
-            return 0;
+            profits = 0;
         }
     }
 
@@ -226,7 +229,7 @@ contract StrategyRouter046 is BaseStrategy {
     {
         // serious loss should never happen, but if it does, let's record it accurately
         uint256 assets = estimatedTotalAssets();
-        uint256 debt = vault.strategies(address(this)).totalDebt;
+        uint256 debt = delegatedAssets();
 
         // if assets are greater than debt, things are working great!
         if (assets >= debt) {
@@ -241,7 +244,7 @@ contract StrategyRouter046 is BaseStrategy {
             (uint256 freed, ) = liquidatePosition(toFree);
 
             if (toFree > freed) {
-                if (_debtPayment > freed) {
+                if (_debtPayment >= freed) {
                     _debtPayment = freed;
                     _profit = 0;
                 } else {
@@ -291,13 +294,18 @@ contract StrategyRouter046 is BaseStrategy {
             toWithdraw = _amountNeeded - balance;
         }
 
+        // withdraw the remainder we need
         _withdrawFromYVault(toWithdraw);
 
         uint256 looseWant = balanceOfWant();
+
+        // because of slippage, dust-sized losses are acceptable
+        // however, we don't want to take losses for funds stuck in a strategy in the destination vault
         if (_amountNeeded > looseWant) {
+            uint256 diff = _amountNeeded - looseWant;
             _liquidatedAmount = looseWant;
-            unchecked {
-                _loss = _amountNeeded - looseWant;
+            if (diff < dustThreshold) {
+                _loss = diff;
             }
         } else {
             _liquidatedAmount = _amountNeeded;
@@ -381,9 +389,7 @@ contract StrategyRouter046 is BaseStrategy {
         virtual
         override
         returns (uint256)
-    {
-        return _amtInWei;
-    }
+    {}
 
     /* ========== KEEP3RS ========== */
 
@@ -467,6 +473,16 @@ contract StrategyRouter046 is BaseStrategy {
     /// @param _maxLoss Max percentage loss we will take, in basis points (100% = 10_000).
     function setMaxLoss(uint256 _maxLoss) public onlyVaultManagers {
         maxLoss = _maxLoss;
+    }
+
+    /// @notice This allows us to set the dust threshold for our strategy.
+    /// @param _dustThreshold This sets what dust is. If we have less than this remaining after withdrawing, accept it as a loss.
+    function setDustThreshold(uint256 _dustThreshold)
+        external
+        onlyVaultManagers
+    {
+        require(_dustThreshold < 10000, "Your size is too much size");
+        dustThreshold = _dustThreshold;
     }
 
     /**

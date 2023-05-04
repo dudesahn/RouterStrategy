@@ -1,5 +1,5 @@
 import pytest
-from brownie import config, ZERO_ADDRESS, chain, interface, accounts
+from brownie import config, ZERO_ADDRESS, chain, interface, accounts, Contract
 import requests
 
 
@@ -38,7 +38,7 @@ def tenderly_fork(web3, chain):
 
 @pytest.fixture(scope="session")
 def token():
-    token_address = "0xC25a3A3b969415c80451098fa907EC722572917F"  # this should be the address of the ERC-20 used by the strategy/vault (curve sUSD)
+    token_address = "0xc4AD29ba4B3c580e6D59105FFf484999997675Ff"  # this should be the address of the ERC-20 used by the strategy/vault (curve 3Crypto)
     yield interface.IERC20(token_address)
 
 
@@ -47,8 +47,8 @@ def whale(amount, token):
     # Totally in it for the tech
     # Update this with a large holder of your want token (the largest EOA holder of LP)
     whale = accounts.at(
-        "0x6190e652462ee63420E45c9c554C22A3C9a694ec", force=True
-    )  # 0x6190e652462ee63420E45c9c554C22A3C9a694ec, SUSD pool, 140k tokens
+        "0x347140c7F001452e6A60131D24b37103D0e34231", force=True
+    )  # 0x347140c7F001452e6A60131D24b37103D0e34231, 3crypto pool, 127 tokens
     if token.balanceOf(whale) < 2 * amount:
         raise ValueError(
             "Our whale needs more funds. Find another whale or reduce your amount variable."
@@ -58,7 +58,7 @@ def whale(amount, token):
 
 @pytest.fixture(scope="session")
 def amount(token):
-    amount = 50_000 * 10 ** token.decimals()
+    amount = 50 * 10 ** token.decimals()
     yield amount
 
 
@@ -66,8 +66,8 @@ def amount(token):
 def profit_whale(profit_amount, token):
     # ideally not the same whale as the main whale, or else they will lose money
     profit_whale = accounts.at(
-        "0x5BB622ba7b2F09BF23F1a9b509cd210A818c53d7", force=True
-    )  # 0x5BB622ba7b2F09BF23F1a9b509cd210A818c53d7, SUSD pool, 114k tokens
+        "0xc7599b60f05639f93D26e58d56D90C526A6e7575", force=True
+    )  # 0xc7599b60f05639f93D26e58d56D90C526A6e7575, 3crypto pool, 105 tokens
     if token.balanceOf(profit_whale) < 5 * profit_amount:
         raise ValueError(
             "Our profit whale needs more funds. Find another whale or reduce your profit_amount variable."
@@ -77,14 +77,14 @@ def profit_whale(profit_amount, token):
 
 @pytest.fixture(scope="session")
 def profit_amount(token):
-    profit_amount = 500 * 10 ** token.decimals()
+    profit_amount = 1 * 10 ** token.decimals()
     yield profit_amount
 
 
 # set address if already deployed, use ZERO_ADDRESS if not
 @pytest.fixture(scope="session")
 def vault_address():
-    vault_address = "0x5a770DbD3Ee6bAF2802D29a901Ef11501C44797A"
+    vault_address = "0xE537B5cc158EB71037D4125BDD7538421981E6AA"
     yield vault_address
 
 
@@ -98,14 +98,14 @@ def old_vault():
 # this is the name we want to give our strategy
 @pytest.fixture(scope="session")
 def strategy_name():
-    strategy_name = "StrategyRouter046"
+    strategy_name = "StrategyRouterV2"
     yield strategy_name
 
 
 # this is the name of our strategy in the .sol file
 @pytest.fixture(scope="session")
-def contract_name(StrategyRouter046):
-    contract_name = StrategyRouter046
+def contract_name(StrategyRouterV2):
+    contract_name = StrategyRouterV2
     yield contract_name
 
 
@@ -230,7 +230,7 @@ def vault(pm, gov, rewards, guardian, management, token, vault_address):
         Vault = pm(config["dependencies"][0]).Vault
         vault = guardian.deploy(Vault)
         vault.initialize(token, gov, rewards, "", "", guardian)
-        vault.setDepositLimit(2 ** 256 - 1, {"from": gov})
+        vault.setDepositLimit(2**256 - 1, {"from": gov})
         vault.setManagement(management, {"from": gov})
     else:
         vault = interface.IVaultFactory045(vault_address)
@@ -240,6 +240,18 @@ def vault(pm, gov, rewards, guardian, management, token, vault_address):
 #################### FIXTURES ABOVE SHOULDN'T NEED TO BE ADJUSTED FOR THIS REPO ####################
 
 #################### FIXTURES BELOW LIKELY NEED TO BE ADJUSTED FOR THIS REPO ####################
+
+
+@pytest.fixture(scope="session")
+def target(destination_strategy):
+    # whatever we want it to be—this is passed into our harvest function as a target
+    yield destination_strategy
+
+
+# this should be a strategy from a different vault to check during migration
+@pytest.fixture(scope="session")
+def other_strategy():
+    yield Contract("0x307Dd52c310e8a5253CBF1FfE5149487d18866eE")
 
 
 @pytest.fixture
@@ -278,7 +290,7 @@ def strategy(
                 interface.ICurveStrategy045(strat_address).harvest({"from": gov})
                 vault.removeStrategyFromQueue(strat_address, {"from": gov})
 
-    vault.addStrategy(strategy, 10_000, 0, 2 ** 256 - 1, 0, {"from": gov})
+    vault.addStrategy(strategy, 10_000, 0, 2**256 - 1, 0, {"from": gov})
 
     # turn our oracle into testing mode by setting the provider to 0x00, then forcing true
     strategy.setBaseFeeOracle(base_fee_oracle, {"from": management})
@@ -294,13 +306,25 @@ def strategy(
 ####################         PUT UNIQUE FIXTURES FOR THIS REPO BELOW         ####################
 
 
+# use this similarly to how we use use_yswaps
+@pytest.fixture(scope="session")
+def is_gmx():
+    yield False
+
+
+# use this similarly to how we use use_yswaps
+@pytest.fixture(scope="session")
+def is_router():
+    yield True
+
+
 @pytest.fixture(scope="session")
 def destination_vault(interface):
     # destination vault of the route
-    yield interface.IVaultFactory045("0x5b2384D566D2E4a0b29B8eccB642C63199cd393c")
+    yield interface.IVaultFactory045("0x8078198Fc424986ae89Ce4a910Fc109587b6aBF3")
 
 
 @pytest.fixture(scope="session")
 def destination_strategy():
     # destination strategy of the route
-    yield interface.ICurveStrategy045("0x83D0458e627cFD7C6d0da12a1223bd168e1c8B64")
+    yield interface.ICurveStrategy045("0x9D7CD0041ABd91f281E282Db3fba7A9Db9E4cC8b")

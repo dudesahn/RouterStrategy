@@ -2,6 +2,8 @@ from brownie import chain, ZERO_ADDRESS
 import pytest
 from utils import harvest_strategy, check_status
 
+# these tests are identical to our withdraw_after_donation, except we also add in a withdrawal from the target vault at the same time
+
 # these tests all assess whether a strategy will hit accounting errors following donations to the strategy.
 # lower debtRatio to 50%, donate, withdraw less than the donation, then harvest
 def test_withdraw_after_donation_1(
@@ -85,6 +87,9 @@ def test_withdraw_after_donation_1(
         # convert since our PPS isn't 1 (live vault!)
         withdrawal_in_shares = to_withdraw * 1e18 / vault.pricePerShare()
         vault.withdraw(withdrawal_in_shares, {"from": whale})
+
+    # withdraw some funds from our target vault, shouldn't affect anything
+    strategy.withdrawFromYVault(donation / 10, {"from": gov})
 
     # simulate some earnings
     chain.sleep(sleep_time)
@@ -310,6 +315,9 @@ def test_withdraw_after_donation_2(
         withdrawal_in_shares = to_withdraw * 1e18 / vault.pricePerShare()
         vault.withdraw(withdrawal_in_shares, {"from": whale})
 
+    # withdraw some funds from our target vault, shouldn't affect anything
+    strategy.withdrawFromYVault(donation / 10, {"from": gov})
+
     # simulate some earnings
     chain.sleep(sleep_time)
 
@@ -513,6 +521,9 @@ def test_withdraw_after_donation_3(
         # convert since our PPS isn't 1 (live vault!)
         withdrawal_in_shares = to_withdraw * 1e18 / vault.pricePerShare()
         vault.withdraw(withdrawal_in_shares, {"from": whale})
+
+    # withdraw some funds from our target vault, shouldn't affect anything
+    strategy.withdrawFromYVault(donation / 10, {"from": gov})
 
     # simulate some earnings
     chain.sleep(sleep_time)
@@ -720,6 +731,9 @@ def test_withdraw_after_donation_4(
         # convert since our PPS isn't 1 (live vault!)
         withdrawal_in_shares = to_withdraw * 1e18 / vault.pricePerShare()
         vault.withdraw(withdrawal_in_shares, {"from": whale})
+
+    # withdraw some funds from our target vault, shouldn't affect anything
+    strategy.withdrawFromYVault(donation / 10, {"from": gov})
 
     # simulate some earnings
     chain.sleep(sleep_time)
@@ -934,6 +948,9 @@ def test_withdraw_after_donation_5(
         withdrawal_in_shares = to_withdraw * 1e18 / vault.pricePerShare()
         vault.withdraw(withdrawal_in_shares, {"from": whale})
 
+    # withdraw some funds from our target vault, shouldn't affect anything
+    strategy.withdrawFromYVault(donation / 10, {"from": gov})
+
     # simulate some earnings
     chain.sleep(sleep_time)
 
@@ -1135,6 +1152,9 @@ def test_withdraw_after_donation_6(
         # convert since our PPS isn't 1 (live vault!)
         withdrawal_in_shares = to_withdraw * 1e18 / vault.pricePerShare()
         vault.withdraw(withdrawal_in_shares, {"from": whale})
+
+    # withdraw some funds from our target vault, shouldn't affect anything
+    strategy.withdrawFromYVault(donation / 10, {"from": gov})
 
     # simulate some earnings
     chain.sleep(sleep_time)
@@ -1353,6 +1373,9 @@ def test_withdraw_after_donation_7(
         # convert since our PPS isn't 1 (live vault!)
         withdrawal_in_shares = to_withdraw * 1e18 / vault.pricePerShare()
         vault.withdraw(withdrawal_in_shares, {"from": whale})
+
+    # withdraw some funds from our target vault, shouldn't affect anything
+    strategy.withdrawFromYVault(donation / 10, {"from": gov})
 
     # simulate some earnings
     chain.sleep(sleep_time)
@@ -1585,6 +1608,9 @@ def test_withdraw_after_donation_8(
         # convert since our PPS isn't 1 (live vault!)
         withdrawal_in_shares = to_withdraw * 1e18 / vault.pricePerShare()
         vault.withdraw(withdrawal_in_shares, {"from": whale})
+
+    # withdraw some funds from our target vault, shouldn't affect anything
+    strategy.withdrawFromYVault(donation / 10, {"from": gov})
 
     # simulate some earnings
     chain.sleep(sleep_time)

@@ -26,15 +26,16 @@ def harvest_strategy(
     # since we don't use yswaps for the main strategy, we don't need to ever prevent profit in the destination vault
     # send profit to our destination vault's strategy
     # if we don't want to harvest our destination strategy, we pass profit_amount to zero
+    extra = 0
     if profit_amount > 0:
-        trade_handler_action(
+        extra = trade_handler_action(
             destination_strategy, token, gov, profit_whale, profit_amount
         )
 
     # we can use the tx for debugging if needed
     tx = strategy.harvest({"from": gov})
-    profit = tx.events["Harvested"]["profit"] / (10 ** token.decimals())
-    loss = tx.events["Harvested"]["loss"] / (10 ** token.decimals())
+    profit = tx.events["Harvested"]["profit"]
+    loss = tx.events["Harvested"]["loss"]
 
     # assert there are no loose funds in strategy after a harvest
     assert strategy.balanceOfWant() == 0
@@ -44,7 +45,7 @@ def harvest_strategy(
     chain.mine(1)
 
     # return our profit, loss
-    return (profit, loss)
+    return (profit, loss, extra)
 
 
 # simulate the trade handler sweeping out assets and sending back profit
@@ -65,7 +66,7 @@ def trade_handler_action(
     # turn off health check for destination strategy
     strategy.setDoHealthCheck(False, {"from": gov})
     target_tx = strategy.harvest({"from": gov})
-    target_profit = target_tx.events["Harvested"]["profit"] / (10 ** token.decimals())
+    target_profit = target_tx.events["Harvested"]["profit"]
 
     # sleep 5 days so share price normalizes
     chain.sleep(86400 * 5)
@@ -74,6 +75,9 @@ def trade_handler_action(
     # make sure we made a profit
     assert target_profit > 0
     print("Profit taken in destination vault")
+
+    # we don't use extra for anything here
+    return 0
 
 
 # do a check on our strategy and vault of choice

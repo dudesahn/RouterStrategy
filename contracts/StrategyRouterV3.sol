@@ -3,30 +3,7 @@ pragma solidity ^0.8.15;
 
 import "@yearnvaults/contracts/BaseStrategy.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
-
-interface IVault is IERC20 {
-    function token() external view returns (address);
-
-    function decimals() external view returns (uint256);
-
-    function deposit() external;
-
-    function pricePerShare() external view returns (uint256);
-
-    function totalAssets() external view returns (uint256);
-
-    function lockedProfit() external view returns (uint256);
-
-    function lockedProfitDegradation() external view returns (uint256);
-
-    function lastReport() external view returns (uint256);
-
-    function withdraw(
-        uint256 amount,
-        address account,
-        uint256 maxLoss
-    ) external returns (uint256);
-}
+import {ShareValueHelper, IYearnVaultV2} from "contracts/ShareValueHelper.sol";
 
 interface IOracle {
     // pull our asset price, in usdc, via yearn's oracle
@@ -36,32 +13,16 @@ interface IOracle {
         returns (uint256);
 }
 
-interface IHelper {
-    function sharesToAmount(address vault, uint256 shares)
-        external
-        view
-        returns (uint256);
-
-    function amountToShares(address vault, uint256 amount)
-        external
-        view
-        returns (uint256);
-}
-
-contract StrategyRouterV2 is BaseStrategy {
+contract StrategyRouterV3 is BaseStrategy {
     using SafeERC20 for IERC20;
 
     /* ========== STATE VARIABLES ========== */
 
     /// @notice The newer yVault we are routing this strategy to.
-    IVault public yVault;
+    IYearnVaultV2 public yVault;
 
     /// @notice Max percentage loss we will take, in basis points (100% = 10_000). Default setting is zero.
     uint256 public maxLoss;
-
-    /// @notice Address of our share value helper contract, which we use for conversions between shares and underlying amounts. Big 🧠 math here.
-    IHelper public constant shareValueHelper =
-        IHelper(0x444443bae5bB8640677A8cdF94CB8879Fec948Ec);
 
     /// @notice Minimum profit size in USDC that we want to harvest.
     /// @dev Only used in harvestTrigger.
@@ -155,11 +116,11 @@ contract StrategyRouterV2 is BaseStrategy {
     function _initializeThis(address _yVault, string memory _strategyName)
         internal
     {
-        yVault = IVault(_yVault);
+        yVault = IYearnVaultV2(_yVault);
         strategyName = _strategyName;
         harvestProfitMinInUsdc = 5_000e6;
         harvestProfitMaxInUsdc = 50_000e6;
-        dustThreshold = 10;
+        dustThreshold = 1e6;
     }
 
     /* ========== VIEWS ========== */
@@ -197,7 +158,8 @@ contract StrategyRouterV2 is BaseStrategy {
         return
             shareValueHelper.sharesToAmount(
                 address(yVault),
-                yVault.balanceOf(address(this))
+                yVault.balanceOf(address(this)),
+                false
             );
     }
 
@@ -272,9 +234,9 @@ contract StrategyRouterV2 is BaseStrategy {
         }
 
         uint256 balance = balanceOfWant();
-        if (balance > 0) {
+        if (balance > dustThreshold) {
             _checkAllowance(address(yVault), address(want), balance);
-            yVault.deposit();
+            yVault.deposit(balance);
         }
     }
 
@@ -327,7 +289,7 @@ contract StrategyRouterV2 is BaseStrategy {
         uint256 _balanceOfYShares = yVault.balanceOf(address(this));
         uint256 sharesToWithdraw =
             Math.min(
-                shareValueHelper.amountToShares(address(yVault), _amount),
+                shareValueHelper.amountToShares(address(yVault), _amount), true),
                 _balanceOfYShares
             );
 

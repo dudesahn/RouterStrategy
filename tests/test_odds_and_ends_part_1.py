@@ -56,6 +56,8 @@ def test_liquidatePosition(
     starting_share_price = vault.pricePerShare()
     initial_strategy_assets = strategy.estimatedTotalAssets()
     loose_want = token.balanceOf(vault)
+    # in the V2 dai vault we have some extra debt not assigned to our main strategy
+    other_debt = vault.totalDebt() - strategy_params["totalDebt"]
 
     ################# SEND ALL FUNDS AWAY. ADJUST AS NEEDED PER STRATEGY. #################
     to_send = destination_vault.balanceOf(strategy)
@@ -70,7 +72,11 @@ def test_liquidatePosition(
     assert strategy_params["debtRatio"] == 10_000
     assert strategy_params["totalLoss"] == 0
     if is_migration:
-        assert strategy_params["totalDebt"] == initial_debt == old_assets - loose_want
+        assert (
+            strategy_params["totalDebt"]
+            == initial_debt
+            == old_assets - loose_want - other_debt
+        )
         assert vault.pricePerShare() >= starting_share_price
     else:
         assert strategy_params["totalDebt"] == initial_debt == old_assets
@@ -381,6 +387,8 @@ def test_rekt(
     initial_strategy_assets = strategy.estimatedTotalAssets()
     initial_debt = strategy_params["totalDebt"]
     starting_share_price = vault.pricePerShare()
+    # in the V2 dai vault we have some extra debt not assigned to our main strategy
+    other_debt = vault.totalDebt() - strategy_params["totalDebt"]
 
     ################# SEND ALL FUNDS AWAY. ADJUST AS NEEDED PER STRATEGY. #################
     to_send = destination_vault.balanceOf(strategy)
@@ -416,11 +424,14 @@ def test_rekt(
 
     if old_vault:
         if is_migration:
-            assert vault.totalAssets() == first_profit
+            assert vault.totalAssets() - other_debt == first_profit
         else:
             assert vault.totalAssets() == 5
     else:
-        assert vault.totalAssets() == 0
+        if is_migration:
+            assert vault.totalAssets() - other_debt == first_profit
+        else:
+            assert vault.totalAssets() == 0
 
     # simulate 5 days of waiting for share price to bump back up
     chain.sleep(86400 * 5)

@@ -3,6 +3,7 @@ from brownie import chain, Contract, ZERO_ADDRESS, accounts
 import pytest
 from utils import harvest_strategy, check_status, trade_handler_action
 
+
 # test our harvest triggers
 def test_triggers(
     gov,
@@ -22,18 +23,21 @@ def test_triggers(
     base_fee_oracle,
     use_yswaps,
     is_gmx,
+    use_v3,
+    destination_vault,
 ):
     # inactive strategy (0 DR and 0 assets) shouldn't be touched by keepers
     currentDebtRatio = vault.strategies(strategy)["debtRatio"]
     vault.updateStrategyDebtRatio(strategy, 0, {"from": gov})
     (profit, loss, extra) = harvest_strategy(
-        use_yswaps,
+        use_v3,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
         target,
+        destination_vault,
     )
     tx = strategy.harvestTrigger(0, {"from": gov})
     print("\nShould we harvest? Should be false.", tx)
@@ -62,13 +66,14 @@ def test_triggers(
 
     # harvest the credit
     (profit, loss, extra) = harvest_strategy(
-        use_yswaps,
+        use_v3,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
         target,
+        destination_vault,
     )
 
     # should trigger false, nothing is ready yet, just harvested
@@ -81,24 +86,15 @@ def test_triggers(
 
     ################# GENERATE CLAIMABLE PROFIT HERE AS NEEDED #################
     # take profit in our destination vault
-    trade_handler_action(target, token, gov, profit_whale, profit_amount)
-    if not no_profit:
-        # check that we have claimable profit, need this for min and max profit checks below
-        claimable_profit = strategy.claimableProfitInUsdc()
-        assert claimable_profit > 0
-
-        # update our minProfit so our harvest triggers true
-        strategy.setHarvestTriggerParams(1, 1000000e6, {"from": gov})
-        tx = strategy.harvestTrigger(0, {"from": gov})
-        print("\nShould we harvest? Should be true.", tx)
-        assert tx == True
-
-        # update our maxProfit so harvest triggers true
-        strategy.setHarvestTriggerParams(1000000e6, 1, {"from": gov})
-        tx = strategy.harvestTrigger(0, {"from": gov})
-        print("\nShould we harvest? Should be true.", tx)
-        assert tx == True
-        strategy.setHarvestTriggerParams(1_000e6, 10_000e6, {"from": gov})
+    trade_handler_action(
+        target,
+        token,
+        gov,
+        profit_whale,
+        profit_amount,
+        use_v3,
+        destination_vault,
+    )
 
     # set our max delay so we trigger true, then set it back to 21 days
     strategy.setMaxReportDelay(sleep_time - 1)
@@ -109,13 +105,14 @@ def test_triggers(
 
     # harvest, wait
     (profit, loss, extra) = harvest_strategy(
-        use_yswaps,
+        use_v3,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
         target,
+        destination_vault,
     )
     print("Profit:", profit, "Loss:", loss)
     chain.sleep(sleep_time)

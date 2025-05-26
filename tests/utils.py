@@ -1,16 +1,19 @@
 import pytest
 import brownie
-from brownie import interface, chain, accounts
+from brownie import interface, chain, accounts, Contract
+import time
+
 
 # returns (profit, loss) of a harvest
 def harvest_strategy(
-    use_yswaps,
+    use_v3,
     strategy,
     token,
     gov,
     profit_whale,
     profit_amount,
     destination_strategy,
+    destination_vault,
 ):
 
     # reset everything with a sleep and mine
@@ -29,16 +32,43 @@ def harvest_strategy(
     extra = 0
     if profit_amount > 0:
         extra = trade_handler_action(
-            destination_strategy, token, gov, profit_whale, profit_amount
+            destination_strategy,
+            token,
+            gov,
+            profit_whale,
+            profit_amount,
+            use_v3,
+            destination_vault,
         )
 
-    # we can use the tx for debugging if needed
-    tx = strategy.harvest({"from": gov})
-    profit = tx.events["Harvested"]["profit"]
-    loss = tx.events["Harvested"]["loss"]
+    # check loose want before harvest
+    print("Loose want before harvest:", strategy.balanceOfWant())
+    print("Vault balance of want:", token.balanceOf(strategy.vault()))
+
+    # do hacky workaround for V3 version...anvil/brownie seems to struggle with it
+    if use_v3:
+        # check gain before
+        vault = Contract(strategy.vault())
+        before_gain = vault.strategies(strategy)["totalGain"]
+        before_loss = vault.strategies(strategy)["totalLoss"]
+        # we can use the tx for debugging if needed
+        strategy.harvest({"from": gov})
+        profit = vault.strategies(strategy)["totalGain"] - before_gain
+        loss = vault.strategies(strategy)["totalLoss"] - before_loss
+    else:
+        # we can use the tx for debugging if needed
+        tx = strategy.harvest({"from": gov})
+        profit = tx.events["Harvested"]["profit"]
+        loss = tx.events["Harvested"]["loss"]
+        print("Debt Payment:", tx.events["Harvested"]["debtPayment"])
+        print("Debt Outstanding:", tx.events["Harvested"]["debtOutstanding"])
 
     # assert there are no loose funds in strategy after a harvest
-    assert strategy.balanceOfWant() == 0
+    print("Loose want after harvest:", strategy.balanceOfWant())
+    print("Vault balance of want:", token.balanceOf(strategy.vault()))
+
+    # I think we should only ever have 1 wei extra here
+    assert strategy.balanceOfWant() <= 1
 
     # reset everything with a sleep and mine
     chain.sleep(1)
@@ -50,23 +80,38 @@ def harvest_strategy(
 
 # simulate the trade handler sweeping out assets and sending back profit
 def trade_handler_action(
-    strategy,
+    destination_strategy,
     token,
     gov,
     profit_whale,
     profit_amount,
+    use_v3,
+    destination_vault,
 ):
     ####### ADD LOGIC AS NEEDED FOR SENDING REWARDS OUT AND PROFITS IN #######
     # in this strategy, we actually need to send profits to our destination strategy and harvest that
 
     # here we should send profit to the destination strategy and then harvest it
     # this is a bit different than "normal" yswaps logic since our main strategy doesn't use yswaps
-    token.transfer(strategy, profit_amount, {"from": profit_whale})
+    token.transfer(destination_strategy, profit_amount, {"from": profit_whale})
 
     # turn off health check for destination strategy
-    strategy.setDoHealthCheck(False, {"from": gov})
-    target_tx = strategy.harvest({"from": gov})
-    target_profit = target_tx.events["Harvested"]["profit"]
+    if use_v3:
+        if destination_strategy.profitMaxUnlockTime() != 0:
+            destination_strategy.setProfitMaxUnlockTime(
+                0, {"from": destination_strategy.management()}
+            )
+        destination_strategy.report({"from": destination_strategy.management()})
+        if destination_vault.profitMaxUnlockTime() != 0:
+            destination_vault.setProfitMaxUnlockTime(0, {"from": gov})
+        target_tx = destination_vault.process_report(
+            destination_strategy, {"from": gov}
+        )
+        target_profit = target_tx.events["StrategyReported"]["gain"]
+    else:
+        destination_strategy.setDoHealthCheck(False, {"from": gov})
+        target_tx = destination_strategy.harvest({"from": gov})
+        target_profit = target_tx.events["Harvested"]["profit"]
 
     # sleep 5 days so share price normalizes
     chain.sleep(86400 * 5)

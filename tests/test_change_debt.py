@@ -2,6 +2,7 @@ import pytest
 from utils import harvest_strategy, check_status
 from brownie import chain
 
+
 # test reducing the debtRatio on a strategy and then harvesting it
 def test_change_debt(
     gov,
@@ -19,19 +20,22 @@ def test_change_debt(
     use_yswaps,
     RELATIVE_APPROX,
     is_gmx,
+    use_v3,
+    destination_vault,
 ):
     ## deposit to the vault after approving
     starting_whale = token.balanceOf(whale)
     token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     (profit, loss, extra) = harvest_strategy(
-        use_yswaps,
+        use_v3,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
         target,
+        destination_vault,
     )
 
     # check our current status
@@ -63,13 +67,14 @@ def test_change_debt(
 
     # harvest to reduce our debt, send 50% of funds back to vault
     (profit, loss, extra) = harvest_strategy(
-        use_yswaps,
+        use_v3,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
         target,
+        destination_vault,
     )
 
     # check our current status
@@ -137,13 +142,14 @@ def test_change_debt(
 
     # harvest to send our funds back to the strategy
     (profit, loss, extra) = harvest_strategy(
-        use_yswaps,
+        use_v3,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
         target,
+        destination_vault,
     )
     print("Profit from our third harvest:", profit)
     assert profit > 0
@@ -192,6 +198,23 @@ def test_change_debt(
         assert vault.pricePerShare() > starting_share_price
         assert strategy_params["totalLoss"] == 0
 
+    # set DebtRatio back to 0%
+    vault.updateStrategyDebtRatio(strategy, 0, {"from": gov})
+
+    # harvest to send our funds back to the strategy
+    # this should fail in schlag's v2 => v3 router version (use_old = True, use_v3 = True)
+    (profit, loss, extra) = harvest_strategy(
+        use_v3,
+        strategy,
+        token,
+        gov,
+        profit_whale,
+        profit_amount,
+        target,
+        destination_vault,
+    )
+    print("Profit from our final harvest:", profit)
+
     # withdraw and confirm we made money, or at least that we have about the same (profit whale has to be different from normal whale)
     vault.withdraw({"from": whale})
     if no_profit:
@@ -219,18 +242,21 @@ def test_change_debt_with_profit(
     use_yswaps,
     RELATIVE_APPROX,
     is_gmx,
+    use_v3,
+    destination_vault,
 ):
     ## deposit to the vault after approving
     token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     (profit, loss, extra) = harvest_strategy(
-        use_yswaps,
+        use_v3,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
         target,
+        destination_vault,
     )
 
     # check our current status
@@ -278,13 +304,14 @@ def test_change_debt_with_profit(
 
     # harvest to reduce our debt, send 50% of funds back to vault
     (profit, loss, extra) = harvest_strategy(
-        use_yswaps,
+        use_v3,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
         target,
+        destination_vault,
     )
 
     # check our current status

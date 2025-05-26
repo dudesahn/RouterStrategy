@@ -8,15 +8,15 @@ import {
     IERC20
 } from "@yearnvaults/contracts/BaseStrategy.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {IVault} from "contracts/interfaces/IVault.sol";
+import {ShareValueHelper, IYearnVaultV2} from "contracts/ShareValueHelper.sol";
 
-contract StrategyRouterV3 is BaseStrategy {
+contract StrategyRouterV2 is BaseStrategy {
     using SafeERC20 for IERC20;
 
     /* ========== STATE VARIABLES ========== */
 
-    /// @notice The V3 yVault we are routing this strategy to.
-    IVault public yVault;
+    /// @notice The newer yVault we are routing this strategy to.
+    IYearnVaultV2 public yVault;
 
     /// @notice Max percentage loss we will take, in basis points (100% = 10_000). Default setting is zero.
     uint256 public maxLoss;
@@ -77,7 +77,7 @@ contract StrategyRouterV3 is BaseStrategy {
             newStrategy := create(0, clone_code, 0x37)
         }
 
-        StrategyRouterV3(newStrategy).initialize(
+        StrategyRouterV2(newStrategy).initialize(
             _vault,
             _strategist,
             _rewards,
@@ -105,8 +105,8 @@ contract StrategyRouterV3 is BaseStrategy {
     function _initializeThis(address _yVault, string memory _strategyName)
         internal
     {
-        require(IVault(_yVault).asset() == address(want), "wrong want");
-        yVault = IVault(_yVault);
+        yVault = IYearnVaultV2(_yVault);
+        require(yVault.token() == address(want), "wrong want");
         strategyName = _strategyName;
         dustThreshold = 10;
         want.safeApprove(_yVault, type(uint256).max);
@@ -142,14 +142,19 @@ contract StrategyRouterV3 is BaseStrategy {
         return want.balanceOf(address(this));
     }
 
-    /// @notice Balance of V3 vault sitting in our strategy.
+    /// @notice Balance of yVault sitting in our strategy.
     function balanceOfVault() public view returns (uint256) {
         return yVault.balanceOf(address(this));
     }
 
     /// @notice Balance of underlying we are holding as vault tokens of our delegated vault.
-    function valueOfInvestment() public view returns (uint256) {
-        return yVault.convertToAssets(balanceOfVault());
+    function valueOfInvestment() public view virtual returns (uint256) {
+        return
+            ShareValueHelper.sharesToAmount(
+                address(yVault),
+                yVault.balanceOf(address(this)),
+                false
+            );
     }
 
     /// @notice Balance of underlying we will gain on our next harvest
@@ -222,11 +227,9 @@ contract StrategyRouterV3 is BaseStrategy {
             return;
         }
 
-        uint256 toDeploy =
-            Math.min(balanceOfWant(), yVault.maxDeposit(address(this)));
-
-        if (toDeploy > dustThreshold) {
-            yVault.deposit(toDeploy, address(this));
+        uint256 balance = balanceOfWant();
+        if (balance > dustThreshold) {
+            yVault.deposit(balance);
         }
     }
 
@@ -276,14 +279,18 @@ contract StrategyRouterV3 is BaseStrategy {
             return;
         }
 
+        uint256 _balanceOfYShares = yVault.balanceOf(address(this));
         uint256 sharesToWithdraw =
-            Math.min(yVault.previewWithdraw(_amount), balanceOfVault());
+            Math.min(
+                ShareValueHelper.amountToShares(address(yVault), _amount, true),
+                _balanceOfYShares
+            );
 
         if (sharesToWithdraw == 0) {
             return;
         }
 
-        yVault.redeem(sharesToWithdraw, address(this), address(this), maxLoss);
+        yVault.withdraw(sharesToWithdraw, address(this), maxLoss);
     }
 
     function liquidateAllPositions()
@@ -293,14 +300,9 @@ contract StrategyRouterV3 is BaseStrategy {
         returns (uint256 _amountFreed)
     {
         // withdraw as much as we can from vault tokens
-        uint256 vaultTokenBalance = balanceOfVault();
+        uint256 vaultTokenBalance = yVault.balanceOf(address(this));
         if (vaultTokenBalance > 0) {
-            yVault.redeem(
-                vaultTokenBalance,
-                address(this),
-                address(this),
-                maxLoss
-            );
+            yVault.withdraw(vaultTokenBalance, address(this), maxLoss);
         }
 
         // return our want balance
@@ -310,9 +312,9 @@ contract StrategyRouterV3 is BaseStrategy {
     function prepareMigration(address _newStrategy) internal virtual override {
         uint256 vaultTokenBalance = balanceOfVault();
         if (vaultTokenBalance > 0) {
-            IERC20(yVault).safeTransfer(
+            IERC20(address(yVault)).safeTransfer(
                 _newStrategy,
-                IERC20(yVault).balanceOf(address(this))
+                yVault.balanceOf(address(this))
             );
         }
     }

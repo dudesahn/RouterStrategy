@@ -3,6 +3,7 @@ from brownie import chain
 import pytest
 from utils import harvest_strategy
 
+
 # make sure cloned strategy works just like normal
 def test_cloning(
     gov,
@@ -25,6 +26,9 @@ def test_cloning(
     profit_amount,
     target,
     use_yswaps,
+    is_gmx,
+    use_v3,
+    use_old,
     destination_vault,
 ):
 
@@ -37,15 +41,18 @@ def test_cloning(
     token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     (profit, loss, extra) = harvest_strategy(
-        use_yswaps,
+        use_v3,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
         target,
+        destination_vault,
     )
     before_pps = vault.pricePerShare()
+    print("First Harvest Profit:", profit)
+    print("First Harvest Loss:", loss)
 
     # tenderly doesn't work for "with brownie.reverts"
     if tests_using_tenderly:
@@ -60,9 +67,36 @@ def test_cloning(
         )
         new_strategy = contract_name.at(tx.return_value)
     else:
-        # Shouldn't be able to call initialize again
-        with brownie.reverts():
-            strategy.initialize(
+        if use_old and use_v3:
+            # Shouldn't be able to call initialize again
+            with brownie.reverts():
+                strategy.initializeThis(
+                    destination_vault,
+                    strategy_name,
+                    {"from": gov},
+                )
+            tx = strategy.cloneRouterStrategy(
+                vault,
+                destination_vault,
+                strategy_name,
+                strategist,
+                rewards,
+                keeper,
+                {"from": gov},
+            )
+        else:
+            # Shouldn't be able to call initialize again
+            with brownie.reverts():
+                strategy.initialize(
+                    vault,
+                    strategist,
+                    rewards,
+                    keeper,
+                    destination_vault,
+                    strategy_name,
+                    {"from": gov},
+                )
+            tx = strategy.cloneRouterStrategy(
                 vault,
                 strategist,
                 rewards,
@@ -71,55 +105,70 @@ def test_cloning(
                 strategy_name,
                 {"from": gov},
             )
-
-        tx = strategy.cloneRouterStrategy(
-            vault,
-            strategist,
-            rewards,
-            keeper,
-            destination_vault,
-            strategy_name,
-            {"from": gov},
-        )
 
         new_strategy = contract_name.at(tx.return_value)
+        if use_old and use_v3:
+            # Shouldn't be able to call initialize again
+            with brownie.reverts():
+                new_strategy.initializeThis(
+                    destination_vault,
+                    strategy_name,
+                    {"from": gov},
+                )
 
-        # Shouldn't be able to call initialize again
-        with brownie.reverts():
-            new_strategy.initialize(
-                vault,
-                strategist,
-                rewards,
-                keeper,
-                destination_vault,
-                strategy_name,
-                {"from": gov},
-            )
+            ## shouldn't be able to clone a clone
+            with brownie.reverts():
+                tx = new_strategy.cloneRouterStrategy(
+                    vault,
+                    destination_vault,
+                    strategy_name,
+                    strategist,
+                    rewards,
+                    keeper,
+                    {"from": gov},
+                )
+        else:
+            # Shouldn't be able to call initialize again
+            with brownie.reverts():
+                new_strategy.initialize(
+                    vault,
+                    strategist,
+                    rewards,
+                    keeper,
+                    destination_vault,
+                    strategy_name,
+                    {"from": gov},
+                )
 
-        ## shouldn't be able to clone a clone
-        with brownie.reverts():
-            tx = new_strategy.cloneRouterStrategy(
-                vault,
-                strategist,
-                rewards,
-                keeper,
-                destination_vault,
-                strategy_name,
-                {"from": gov},
-            )
+            ## shouldn't be able to clone a clone
+            with brownie.reverts():
+                tx = new_strategy.cloneRouterStrategy(
+                    vault,
+                    strategist,
+                    rewards,
+                    keeper,
+                    destination_vault,
+                    strategy_name,
+                    {"from": gov},
+                )
 
     # revoke, get funds back into vault, remove old strat from queue
     vault.revokeStrategy(strategy, {"from": gov})
 
     (profit, loss, extra) = harvest_strategy(
-        use_yswaps,
+        use_v3,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
         target,
+        destination_vault,
     )
+    assert vault.debtOutstanding(strategy) == 0
+    assert vault.strategies(strategy)["totalDebt"] == 0
+    print("Second Harvest Profit:", profit)
+    print("Second Harvest Loss:", loss)
     vault.removeStrategyFromQueue(strategy.address, {"from": gov})
 
     # attach our new strategy, ensure it's the only one
@@ -130,14 +179,17 @@ def test_cloning(
 
     # harvest, store asset amount
     (profit, loss, extra) = harvest_strategy(
-        use_yswaps,
+        use_v3,
         new_strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
         target,
+        destination_vault,
     )
+    print("First Harvest Profit (new strategy):", profit)
+    print("First Harvest Loss (new strategy):", loss)
     old_assets = vault.totalAssets()
     assert old_assets > 0
     assert token.balanceOf(new_strategy) == 0
@@ -148,14 +200,17 @@ def test_cloning(
 
     # harvest after a day, store new asset amount
     (profit, loss, extra) = harvest_strategy(
-        use_yswaps,
+        use_v3,
         new_strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
         target,
+        destination_vault,
     )
+    print("Second Harvest Profit (new strategy):", profit)
+    print("Second Harvest Loss (new strategy):", loss)
 
     # harvest again so the strategy reports the profit
     if use_yswaps:

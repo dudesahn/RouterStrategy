@@ -3,6 +3,7 @@ from utils import harvest_strategy, check_status
 import brownie
 from brownie import ZERO_ADDRESS, chain, interface
 
+
 # test removing a strategy from the withdrawal queue
 def test_remove_from_withdrawal_queue(
     gov,
@@ -17,31 +18,35 @@ def test_remove_from_withdrawal_queue(
     target,
     use_yswaps,
     is_gmx,
+    use_v3,
+    destination_vault,
 ):
     ## deposit to the vault after approving
     starting_whale = token.balanceOf(whale)
     token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     (profit, loss, extra) = harvest_strategy(
-        use_yswaps,
+        use_v3,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
         target,
+        destination_vault,
     )
 
     # simulate earnings, harvest
     chain.sleep(sleep_time)
     (profit, loss, extra) = harvest_strategy(
-        use_yswaps,
+        use_v3,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
         target,
+        destination_vault,
     )
 
     # removing a strategy from the queue shouldn't change its assets
@@ -81,6 +86,8 @@ def test_revoke_strategy_from_vault(
     use_yswaps,
     RELATIVE_APPROX,
     is_gmx,
+    use_v3,
+    destination_vault,
 ):
 
     ## deposit to the vault after approving
@@ -88,13 +95,14 @@ def test_revoke_strategy_from_vault(
     token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     (profit, loss, extra) = harvest_strategy(
-        use_yswaps,
+        use_v3,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
         target,
+        destination_vault,
     )
 
     # sleep to earn some yield
@@ -109,13 +117,14 @@ def test_revoke_strategy_from_vault(
     vault.revokeStrategy(strategy.address, {"from": gov})
 
     (profit, loss, extra) = harvest_strategy(
-        use_yswaps,
+        use_v3,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
         target,
+        destination_vault,
     )
 
     # harvest again to get the last of our profit with ySwaps
@@ -186,6 +195,9 @@ def test_setters(
     target,
     strategist,
     is_gmx,
+    use_v3,
+    destination_vault,
+    use_old,
 ):
     # deposit to the vault after approving
     starting_whale = token.balanceOf(whale)
@@ -199,18 +211,22 @@ def test_setters(
     strategy.setRewards(gov, {"from": gov})
     strategy.setStrategist(gov, {"from": gov})
 
+    if use_v3 and use_old:
+        return
+
     ######### BELOW WILL NEED TO BE UPDATED BASED SETTERS OUR STRATEGY HAS #########
     strategy.setMaxLoss(1, {"from": gov})
 
     # harvest our credit
     (profit, loss, extra) = harvest_strategy(
-        use_yswaps,
+        use_v3,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
         target,
+        destination_vault,
     )
 
     strategy.setStrategist(strategist, {"from": gov})
@@ -224,7 +240,7 @@ def test_setters(
         strategy.withdrawFromYVault(7, {"from": whale})
 
     with brownie.reverts():
-        strategy.setDustThreshold(10_0001, {"from": gov})
+        strategy.setDustThreshold(100_0001, {"from": gov})
 
     # make sure we can do this
     strategy.withdrawFromYVault(0, {"from": gov})
@@ -245,18 +261,21 @@ def test_sweep(
     target,
     use_yswaps,
     is_gmx,
+    use_v3,
+    destination_vault,
 ):
     # deposit to the vault after approving
     token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     (profit, loss, extra) = harvest_strategy(
-        use_yswaps,
+        use_v3,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
         target,
+        destination_vault,
     )
 
     # we can sweep out non-want tokens

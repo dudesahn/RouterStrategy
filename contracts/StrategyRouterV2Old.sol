@@ -1,25 +1,75 @@
 // SPDX-License-Identifier: AGPL-3.0
 pragma solidity ^0.8.15;
 
-import {
-    BaseStrategy,
-    StrategyParams,
-    SafeERC20,
-    IERC20
-} from "@yearnvaults/contracts/BaseStrategy.sol";
-import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
-import {IVault} from "contracts/interfaces/IVault.sol";
+import "@yearnvaults/contracts/BaseStrategy.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
 
-contract StrategyRouterV3 is BaseStrategy {
+interface IVault is IERC20 {
+    function token() external view returns (address);
+
+    function decimals() external view returns (uint256);
+
+    function deposit() external;
+
+    function pricePerShare() external view returns (uint256);
+
+    function totalAssets() external view returns (uint256);
+
+    function lockedProfit() external view returns (uint256);
+
+    function lockedProfitDegradation() external view returns (uint256);
+
+    function lastReport() external view returns (uint256);
+
+    function withdraw(
+        uint256 amount,
+        address account,
+        uint256 maxLoss
+    ) external returns (uint256);
+}
+
+interface IOracle {
+    // pull our asset price, in usdc, via yearn's oracle
+    function getPriceUsdcRecommended(address tokenAddress)
+        external
+        view
+        returns (uint256);
+}
+
+interface IHelper {
+    function sharesToAmount(address vault, uint256 shares)
+        external
+        view
+        returns (uint256);
+
+    function amountToShares(address vault, uint256 amount)
+        external
+        view
+        returns (uint256);
+}
+
+contract StrategyRouterV2Old is BaseStrategy {
     using SafeERC20 for IERC20;
 
     /* ========== STATE VARIABLES ========== */
 
-    /// @notice The V3 yVault we are routing this strategy to.
+    /// @notice The newer yVault we are routing this strategy to.
     IVault public yVault;
 
     /// @notice Max percentage loss we will take, in basis points (100% = 10_000). Default setting is zero.
     uint256 public maxLoss;
+
+    /// @notice Address of our share value helper contract, which we use for conversions between shares and underlying amounts. Big 🧠 math here.
+    IHelper public constant shareValueHelper =
+        IHelper(0x444443bae5bB8640677A8cdF94CB8879Fec948Ec);
+
+    /// @notice Minimum profit size in USDC that we want to harvest.
+    /// @dev Only used in harvestTrigger.
+    uint256 public harvestProfitMinInUsdc;
+
+    /// @notice Maximum profit size in USDC that we want to harvest (ignore gas price once we get here).
+    /// @dev Only used in harvestTrigger.
+    uint256 public harvestProfitMaxInUsdc;
 
     /// @notice Amount we accept as a loss in liquidatePosition if we don't get 100% back due to rounding errors.
     uint256 public dustThreshold;
@@ -77,7 +127,7 @@ contract StrategyRouterV3 is BaseStrategy {
             newStrategy := create(0, clone_code, 0x37)
         }
 
-        StrategyRouterV3(newStrategy).initialize(
+        StrategyRouterV2Old(newStrategy).initialize(
             _vault,
             _strategist,
             _rewards,
@@ -105,11 +155,11 @@ contract StrategyRouterV3 is BaseStrategy {
     function _initializeThis(address _yVault, string memory _strategyName)
         internal
     {
-        require(IVault(_yVault).asset() == address(want), "wrong want");
         yVault = IVault(_yVault);
         strategyName = _strategyName;
+        harvestProfitMinInUsdc = 5_000e6;
+        harvestProfitMaxInUsdc = 50_000e6;
         dustThreshold = 10;
-        want.safeApprove(_yVault, type(uint256).max);
     }
 
     /* ========== VIEWS ========== */
@@ -142,18 +192,17 @@ contract StrategyRouterV3 is BaseStrategy {
         return want.balanceOf(address(this));
     }
 
-    /// @notice Balance of V3 vault sitting in our strategy.
-    function balanceOfVault() public view returns (uint256) {
-        return yVault.balanceOf(address(this));
-    }
-
     /// @notice Balance of underlying we are holding as vault tokens of our delegated vault.
-    function valueOfInvestment() public view returns (uint256) {
-        return yVault.convertToAssets(balanceOfVault());
+    function valueOfInvestment() public view virtual returns (uint256) {
+        return
+            shareValueHelper.sharesToAmount(
+                address(yVault),
+                yVault.balanceOf(address(this))
+            );
     }
 
     /// @notice Balance of underlying we will gain on our next harvest
-    function claimableProfits() external view returns (uint256 profits) {
+    function claimableProfits() public view returns (uint256 profits) {
         uint256 assets = estimatedTotalAssets();
         uint256 debt = delegatedAssets();
 
@@ -222,11 +271,10 @@ contract StrategyRouterV3 is BaseStrategy {
             return;
         }
 
-        uint256 toDeploy =
-            Math.min(balanceOfWant(), yVault.maxDeposit(address(this)));
-
-        if (toDeploy > dustThreshold) {
-            yVault.deposit(toDeploy, address(this));
+        uint256 balance = balanceOfWant();
+        if (balance > 0) {
+            _checkAllowance(address(yVault), address(want), balance);
+            yVault.deposit();
         }
     }
 
@@ -276,14 +324,18 @@ contract StrategyRouterV3 is BaseStrategy {
             return;
         }
 
+        uint256 _balanceOfYShares = yVault.balanceOf(address(this));
         uint256 sharesToWithdraw =
-            Math.min(yVault.previewWithdraw(_amount), balanceOfVault());
+            Math.min(
+                shareValueHelper.amountToShares(address(yVault), _amount),
+                _balanceOfYShares
+            );
 
         if (sharesToWithdraw == 0) {
             return;
         }
 
-        yVault.redeem(sharesToWithdraw, address(this), address(this), maxLoss);
+        yVault.withdraw(sharesToWithdraw, address(this), maxLoss);
     }
 
     function liquidateAllPositions()
@@ -293,14 +345,9 @@ contract StrategyRouterV3 is BaseStrategy {
         returns (uint256 _amountFreed)
     {
         // withdraw as much as we can from vault tokens
-        uint256 vaultTokenBalance = balanceOfVault();
+        uint256 vaultTokenBalance = yVault.balanceOf(address(this));
         if (vaultTokenBalance > 0) {
-            yVault.redeem(
-                vaultTokenBalance,
-                address(this),
-                address(this),
-                maxLoss
-            );
+            yVault.withdraw(vaultTokenBalance, address(this), maxLoss);
         }
 
         // return our want balance
@@ -308,13 +355,10 @@ contract StrategyRouterV3 is BaseStrategy {
     }
 
     function prepareMigration(address _newStrategy) internal virtual override {
-        uint256 vaultTokenBalance = balanceOfVault();
-        if (vaultTokenBalance > 0) {
-            IERC20(yVault).safeTransfer(
-                _newStrategy,
-                IERC20(yVault).balanceOf(address(this))
-            );
-        }
+        IERC20(yVault).safeTransfer(
+            _newStrategy,
+            IERC20(yVault).balanceOf(address(this))
+        );
     }
 
     function protectedTokens()
@@ -323,6 +367,17 @@ contract StrategyRouterV3 is BaseStrategy {
         override
         returns (address[] memory ret)
     {}
+
+    function _checkAllowance(
+        address _contract,
+        address _token,
+        uint256 _amount
+    ) internal {
+        if (IERC20(_token).allowance(address(this), _contract) < _amount) {
+            IERC20(_token).safeApprove(_contract, 0);
+            IERC20(_token).safeApprove(_contract, type(uint256).max);
+        }
+    }
 
     /// @notice Convert our keeper's eth cost into want
     /// @dev We don't use this since we don't factor call cost into our harvestTrigger.
@@ -361,6 +416,12 @@ contract StrategyRouterV3 is BaseStrategy {
             return false;
         }
 
+        // harvest if we have a profit to claim at our upper limit without considering gas price
+        uint256 claimableProfit = claimableProfitInUsdc();
+        if (claimableProfit > harvestProfitMaxInUsdc) {
+            return true;
+        }
+
         // check if the base fee gas price is higher than we allow. if it is, block harvests.
         if (!isBaseFeeAcceptable()) {
             return false;
@@ -368,6 +429,11 @@ contract StrategyRouterV3 is BaseStrategy {
 
         // trigger if we want to manually harvest, but only if our gas price is acceptable
         if (forceHarvestTriggerOnce) {
+            return true;
+        }
+
+        // harvest if we have a sufficient profit to claim, but only if our gas price is acceptable
+        if (claimableProfit > harvestProfitMinInUsdc) {
             return true;
         }
 
@@ -386,6 +452,19 @@ contract StrategyRouterV3 is BaseStrategy {
         return false;
     }
 
+    /// @notice Calculates the profit if all claimable assets were sold for USDC (6 decimals).
+    /// @dev Uses yearn's lens oracle, if returned values are strange then troubleshoot there.
+    /// @return Total return in USDC from taking profits on yToken gains.
+    function claimableProfitInUsdc() public view returns (uint256) {
+        IOracle yearnOracle =
+            IOracle(0x83d95e0D5f402511dB06817Aff3f9eA88224B030); // yearn lens oracle
+        uint256 underlyingPrice =
+            yearnOracle.getPriceUsdcRecommended(address(want));
+
+        // Oracle returns prices as 6 decimals, so multiply by claimable amount and divide by token decimals
+        return (claimableProfits() * underlyingPrice) / (10**yVault.decimals());
+    }
+
     /* ========== SETTERS ========== */
     // These functions are useful for setting parameters of the strategy that may need to be adjusted.
 
@@ -402,7 +481,23 @@ contract StrategyRouterV3 is BaseStrategy {
         external
         onlyVaultManagers
     {
-        require(_dustThreshold < 1e6, "Your size is too much size");
+        require(_dustThreshold < 10000, "Your size is too much size");
         dustThreshold = _dustThreshold;
+    }
+
+    /**
+     * @notice
+     *  Here we set various parameters to optimize our harvestTrigger.
+     * @param _harvestProfitMinInUsdc The amount of profit (in USDC, 6 decimals)
+     *  that will trigger a harvest if gas price is acceptable.
+     * @param _harvestProfitMaxInUsdc The amount of profit in USDC that
+     *  will trigger a harvest regardless of gas price.
+     */
+    function setHarvestTriggerParams(
+        uint256 _harvestProfitMinInUsdc,
+        uint256 _harvestProfitMaxInUsdc
+    ) external onlyVaultManagers {
+        harvestProfitMinInUsdc = _harvestProfitMinInUsdc;
+        harvestProfitMaxInUsdc = _harvestProfitMaxInUsdc;
     }
 }

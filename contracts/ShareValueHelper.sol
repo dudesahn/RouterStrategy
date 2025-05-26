@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGLP-3.0
 pragma solidity ^0.8.19;
 
-import {IYearnVaultV2} from "contract/interfaces/IYearnVaultV2.sol";
+import {IYearnVaultV2} from "contracts/interfaces/IYearnVaultV2.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";
 
 /**
@@ -58,17 +58,19 @@ library ShareValueHelper {
         }
     }
 
-    function calculateFreeFunds(
-        address _vault
-    ) internal view returns (uint256) {
+    function calculateFreeFunds(address _vault)
+        internal
+        view
+        returns (uint256)
+    {
         uint256 totalAssets = IYearnVaultV2(_vault).totalAssets();
-        uint256 lockedFundsRatio = (block.timestamp -
-            IYearnVaultV2(_vault).lastReport()) *
-            IYearnVaultV2(_vault).lockedProfitDegradation();
+        uint256 lockedFundsRatio =
+            (block.timestamp - IYearnVaultV2(_vault).lastReport()) *
+                IYearnVaultV2(_vault).lockedProfitDegradation();
 
-        if (lockedFundsRatio < 10 ** 18) {
+        if (lockedFundsRatio < 10**18) {
             uint256 lockedProfit = IYearnVaultV2(_vault).lockedProfit();
-            lockedProfit -= ((lockedFundsRatio * lockedProfit) / 10 ** 18);
+            lockedProfit -= ((lockedFundsRatio * lockedProfit) / 10**18);
             return totalAssets - lockedProfit;
         } else {
             return totalAssets;

@@ -3,6 +3,7 @@ from utils import harvest_strategy, check_status
 from brownie import accounts, interface, chain
 import brownie
 
+
 # test migrating a strategy
 def test_migration(
     gov,
@@ -21,6 +22,7 @@ def test_migration(
     is_slippery,
     no_profit,
     is_gmx,
+    use_v3,
     strategy_name,
     destination_vault,
 ):
@@ -29,13 +31,14 @@ def test_migration(
     token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     (profit, loss, extra) = harvest_strategy(
-        use_yswaps,
+        use_v3,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
         target,
+        destination_vault,
     )
 
     # record our current strategy's assets
@@ -54,13 +57,14 @@ def test_migration(
 
     # harvest to take some profits
     (profit, loss, extra) = harvest_strategy(
-        use_yswaps,
+        use_v3,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
         target,
+        destination_vault,
     )
 
     ######### ADD LOGIC TO TEST CLAIMING OF ASSETS FOR TRANSFER TO NEW STRATEGY AS NEEDED #########
@@ -81,13 +85,14 @@ def test_migration(
 
     # harvest to get funds back in new strategy
     (profit, loss, extra) = harvest_strategy(
-        use_yswaps,
+        use_v3,
         new_strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
         target,
+        destination_vault,
     )
     new_strat_balance = new_strategy.estimatedTotalAssets()
     assert new_strat_balance > 0
@@ -128,13 +133,14 @@ def test_migration(
 
     # Test out our migrated strategy, confirm we're making a profit
     (profit, loss, extra) = harvest_strategy(
-        use_yswaps,
+        use_v3,
         new_strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
         target,
+        destination_vault,
     )
 
     vault_newer_assets = vault.totalAssets()
@@ -165,21 +171,23 @@ def test_empty_migration(
     is_slippery,
     RELATIVE_APPROX,
     is_gmx,
-    strategy_name,
+    use_v3,
     destination_vault,
+    strategy_name,
 ):
 
     ## deposit to the vault after approving
     token.approve(vault, 2**256 - 1, {"from": whale})
     vault.deposit(amount, {"from": whale})
     (profit, loss, extra) = harvest_strategy(
-        use_yswaps,
+        use_v3,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
         target,
+        destination_vault,
     )
 
     # record our current strategy's assets
@@ -194,13 +202,14 @@ def test_empty_migration(
     # set our debtRatio to zero so our harvest sends all funds back to vault
     vault.updateStrategyDebtRatio(strategy, 0, {"from": gov})
     (profit, loss, extra) = harvest_strategy(
-        use_yswaps,
+        use_v3,
         strategy,
         token,
         gov,
         profit_whale,
         profit_amount,
         target,
+        destination_vault,
     )
 
     # yswaps needs another harvest to get the final bit of profit to the vault
@@ -224,13 +233,14 @@ def test_empty_migration(
         # turn off health check since taking profit on no debt
         strategy.setDoHealthCheck(False, {"from": gov})
         (profit, loss, extra) = harvest_strategy(
-            use_yswaps,
+            use_v3,
             strategy,
             token,
             gov,
             profit_whale,
             profit_amount,
             target,
+            destination_vault,
         )
 
     if is_gmx:

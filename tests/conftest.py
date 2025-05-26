@@ -364,7 +364,7 @@ def use_old():
 # NOTE: we've only updated testing for simple_harvest to work with the V3 strategies
 @pytest.fixture(scope="session")
 def use_v3():
-    yield True
+    yield False
 
 
 # flag to denote if we're migrating from existing strategies and thus will likely have profit on our first harvest

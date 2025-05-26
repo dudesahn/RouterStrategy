@@ -120,7 +120,10 @@ def test_emergency_exit_with_no_loss(
     strategy_params = check_status(strategy, vault)
 
     # only DR and debtOutstanding should have changed
-    assert vault.pricePerShare() == starting_share_price
+    if is_migration:
+        assert vault.pricePerShare() >= starting_share_price
+    else:
+        assert vault.pricePerShare() == starting_share_price
     assert strategy_params["debtRatio"] == 0
     assert strategy_params["totalLoss"] == 0
     assert vault.creditAvailable(strategy) == 0

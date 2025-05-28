@@ -310,10 +310,7 @@ contract StrategyRouterV3 is BaseStrategy {
     function prepareMigration(address _newStrategy) internal virtual override {
         uint256 vaultTokenBalance = balanceOfVault();
         if (vaultTokenBalance > 0) {
-            IERC20(yVault).safeTransfer(
-                _newStrategy,
-                IERC20(yVault).balanceOf(address(this))
-            );
+            IERC20(yVault).safeTransfer(_newStrategy, vaultTokenBalance);
         }
     }
 

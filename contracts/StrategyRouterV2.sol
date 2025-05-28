@@ -152,7 +152,7 @@ contract StrategyRouterV2 is BaseStrategy {
         return
             ShareValueHelper.sharesToAmount(
                 address(yVault),
-                yVault.balanceOf(address(this)),
+                balanceOfVault(),
                 false
             );
     }
@@ -279,7 +279,7 @@ contract StrategyRouterV2 is BaseStrategy {
             return;
         }
 
-        uint256 _balanceOfYShares = yVault.balanceOf(address(this));
+        uint256 _balanceOfYShares = balanceOfVault();
         uint256 sharesToWithdraw =
             Math.min(
                 ShareValueHelper.amountToShares(address(yVault), _amount, true),
@@ -300,7 +300,7 @@ contract StrategyRouterV2 is BaseStrategy {
         returns (uint256 _amountFreed)
     {
         // withdraw as much as we can from vault tokens
-        uint256 vaultTokenBalance = yVault.balanceOf(address(this));
+        uint256 vaultTokenBalance = balanceOfVault();
         if (vaultTokenBalance > 0) {
             yVault.withdraw(vaultTokenBalance, address(this), maxLoss);
         }
@@ -314,7 +314,7 @@ contract StrategyRouterV2 is BaseStrategy {
         if (vaultTokenBalance > 0) {
             IERC20(address(yVault)).safeTransfer(
                 _newStrategy,
-                yVault.balanceOf(address(this))
+                vaultTokenBalance
             );
         }
     }

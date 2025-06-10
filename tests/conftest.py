@@ -361,10 +361,9 @@ def use_old():
 
 
 # use this if we're doing a V2 or V3 router
-# NOTE: we've only updated testing for simple_harvest to work with the V3 strategies
 @pytest.fixture(scope="session")
 def use_v3():
-    yield False
+    yield True
 
 
 # flag to denote if we're migrating from existing strategies and thus will likely have profit on our first harvest

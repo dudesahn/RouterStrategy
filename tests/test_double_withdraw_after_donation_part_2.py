@@ -555,7 +555,14 @@ def test_withdraw_after_donation_6(
         assert pytest.approx(strategy_params["totalLoss"], rel=RELATIVE_APPROX) == 0
     else:
         assert strategy_params["totalLoss"] == 0
-    assert vault.creditAvailable(strategy) == 0
+    if is_migration and profit > to_withdraw:
+        # with migrations we can get more profit on the first harvest than we withdraw, thus we are left with credit
+        estimated_credit = profit - to_withdraw
+        assert int(vault.creditAvailable(strategy)) == pytest.approx(
+            estimated_credit, abs=10**9
+        )
+    else:
+        assert vault.creditAvailable(strategy) == 0
     assert (
         pytest.approx(initial_debt, rel=RELATIVE_APPROX)
         == strategy_params["totalDebt"] + to_withdraw

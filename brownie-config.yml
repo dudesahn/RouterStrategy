@@ -1,6 +1,7 @@
 # use Ganache's forked mainnet mode as the default network (mainnet-fork)
 # NOTE: You don't *have* to do this, but it is often helpful for testing
 networks:
+  # mainnet-fork is best for ganache for V2 => V2, or mainnet-anvil-fork for anvil (needed for V2 => V3)
   default: mainnet-anvil-fork
 
 # automatically fetch contract sources from Etherscan

@@ -333,56 +333,6 @@ contract StrategyRouterV3 is BaseStrategy {
         returns (uint256)
     {}
 
-    /* ========== KEEP3RS ========== */
-
-    /**
-     * @notice
-     *  Provide a signal to the keeper that harvest() should be called.
-     *
-     *  Don't harvest if a strategy is inactive.
-     *  If our profit exceeds our upper limit, then harvest no matter what. For
-     *  our lower profit limit, credit threshold, max delay, and manual force trigger,
-     *  only harvest if our gas price is acceptable.
-     *
-     * @param callCostinEth The keeper's estimated gas cost to call harvest() (in wei).
-     * @return True if harvest() should be called, false otherwise.
-     */
-    function harvestTrigger(uint256 callCostinEth)
-        public
-        view
-        override
-        returns (bool)
-    {
-        // Should not trigger if strategy is not active (no assets and no debtRatio). This means we don't need to adjust keeper job.
-        if (!isActive()) {
-            return false;
-        }
-
-        // check if the base fee gas price is higher than we allow. if it is, block harvests.
-        if (!isBaseFeeAcceptable()) {
-            return false;
-        }
-
-        // trigger if we want to manually harvest, but only if our gas price is acceptable
-        if (forceHarvestTriggerOnce) {
-            return true;
-        }
-
-        StrategyParams memory params = vault.strategies(address(this));
-        // harvest regardless of profit once we reach our maxDelay
-        if (block.timestamp - params.lastReport > maxReportDelay) {
-            return true;
-        }
-
-        // harvest our credit if it's above our threshold
-        if (vault.creditAvailable() > creditThreshold) {
-            return true;
-        }
-
-        // otherwise, we don't harvest
-        return false;
-    }
-
     /* ========== SETTERS ========== */
     // These functions are useful for setting parameters of the strategy that may need to be adjusted.
 
@@ -390,6 +340,7 @@ contract StrategyRouterV3 is BaseStrategy {
     /// @dev Generally, this should be zero, and this function will only be used in special/emergency cases.
     /// @param _maxLoss Max percentage loss we will take, in basis points (100% = 10_000).
     function setMaxLoss(uint256 _maxLoss) public onlyVaultManagers {
+        require(_maxLoss <= 10_000, "!bps");
         maxLoss = _maxLoss;
     }
 

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGLP-3.0
-pragma solidity ^0.8.19;
+pragma solidity 0.8.28;
 
 import {IYearnVaultV2} from "contracts/interfaces/IYearnVaultV2.sol";
 import {Math} from "@openzeppelin/contracts/utils/math/Math.sol";

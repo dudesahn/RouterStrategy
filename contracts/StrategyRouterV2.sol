@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0
-pragma solidity ^0.8.15;
+pragma solidity 0.8.28;
 
 import {
     BaseStrategy,
@@ -15,7 +15,7 @@ contract StrategyRouterV2 is BaseStrategy {
 
     /* ========== STATE VARIABLES ========== */
 
-    /// @notice The newer yVault we are routing this strategy to.
+    /// @notice The newer V2 yVault we are routing this strategy to.
     IYearnVaultV2 public yVault;
 
     /// @notice Max percentage loss we will take, in basis points (100% = 10_000). Default setting is zero.

@@ -1,58 +1,54 @@
-from pathlib import Path
-
-from brownie import Strategy, accounts, config, network, project, web3
-from eth_utils import is_checksum_address
+from brownie import (
+    StrategyRouterV2,
+    StrategyRouterV3,
+    accounts,
+    config,
+    Contract,
+    project,
+    web3,
+)
 import click
 
-API_VERSION = config["dependencies"][0].split("@")[-1]
-Vault = project.load(
-    Path.home() / ".brownie" / "packages" / config["dependencies"][0]
-).Vault
-
-
-def get_address(msg: str, default: str = None) -> str:
-    val = click.prompt(msg, default=default)
-
-    # Keep asking user for click.prompt until it passes
-    while True:
-
-        if is_checksum_address(val):
-            return val
-        elif addr := web3.ens.address(val):
-            click.echo(f"Found ENS '{val}' [{addr}]")
-            return addr
-
-        click.echo(
-            f"I'm sorry, but '{val}' is not a checksummed address or valid ENS record"
-        )
-        # NOTE: Only display default once
-        val = click.prompt(msg)
-
-
 def main():
-    print(f"You are using the '{network.show_active()}' network")
-    dev = accounts.load(click.prompt("Account", type=click.Choice(accounts.load())))
-    print(f"You are using: 'dev' [{dev.address}]")
+    deployer = accounts.load("llc2")
 
-    if input("Is there a Vault for this strategy already? y/[N]: ").lower() == "y":
-        vault = Vault.at(get_address("Deployed Vault: "))
-        assert vault.apiVersion() == API_VERSION
-    else:
-        print("You should deploy one vault using scripts from Vault project")
-        return  # TODO: Deploy one using scripts from Vault project
-
-    print(
-        f"""
-    Strategy Parameters
-
-       api: {API_VERSION}
-     token: {vault.token()}
-      name: '{vault.name()}'
-    symbol: '{vault.symbol()}'
-    """
+    # use this to decide whether to deploy V2 or V3 router strategy and confirm we selected correctly
+    deploy_v2 = click.prompt(
+        "Do you want to deploy the V2 => V2 version of this strategy?", type=bool
     )
-    publish_source = click.confirm("Verify source on etherscan?")
-    if input("Deploy Strategy? y/[N]: ").lower() != "y":
-        return
+    if not deploy_v2:
+        deploy_v3 = click.prompt(
+            "Do you want to deploy the V2 => V3 version of this strategy?", type=bool
+        )
+        assert deploy_v3
 
-    strategy = Strategy.deploy(vault, {"from": dev}, publish_source=publish_source)
+    if deploy_v2:
+        contract_name = StrategyRouterV2
+        # 3Crypto
+        vault = Contract("0xE537B5cc158EB71037D4125BDD7538421981E6AA")
+        destination_vault = Contract("0x8078198Fc424986ae89Ce4a910Fc109587b6aBF3")
+        strategy_name = "StrategyRouterV2-Curve-3Crypto"
+    else:
+        contract_name = StrategyRouterV3
+        # DAI 0.4.3
+        vault = Contract("0xdA816459F1AB5631232FE5e97a05BBBb94970c95")
+        destination_vault = Contract("0x028eC7330ff87667b6dfb0D94b954c820195336c")
+        strategy_name = "StrategyRouterV3-DAI"
+
+    print("Strategy Vault:", vault.name(), vault.address)
+    print("Destination Vault:", destination_vault.name(), destination_vault.address)
+
+    strategy = deployer.deploy(
+        contract_name,
+        vault.address,
+        destination_vault.address,
+        strategy_name,
+        publish_source=True,
+    )
+
+    # set keeper for our stealth job
+    keeper = "0x736D7e3c5a6CB2CE3B764300140ABF476F6CFCCF"
+    strategy.setKeeper(keeper, {"from": deployer})
+    # strategy.setCreditThreshold(20_000e18)
+    # vault.addStrategy(strategy, 10_000, 0, 2**256 - 1, 1_000, {"from": gov})
+    # yield strategy
